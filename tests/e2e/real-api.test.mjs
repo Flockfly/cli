@@ -235,3 +235,89 @@ test("TS E2E: replaces a skill after confirmation and search returns the new ver
   assert.equal(load.code, 0, load.stderr);
 });
 
+test("search --load selects and renders the top real-API result without loading empty results", async () => {
+  const owner = await loginSession("search-load@rust-e2e.dev");
+  const secondaryDirectory = await writeSkillDirectory(
+    "search-load-secondary-rust",
+    "A generic workflow unrelated to the quartz sentinel.",
+  );
+  const secondary = await owner.run([
+    "publish",
+    secondaryDirectory,
+    "--team",
+    "search-load's personal",
+  ]);
+  assert.equal(secondary.code, 0, secondary.stderr);
+
+  const topDirectory = await writeSkillDirectory(
+    "search-load-top-rust",
+    "Search load integration sentinel quartz workflow.",
+  );
+  const top = await owner.run([
+    "publish",
+    topDirectory,
+    "--team",
+    "search-load's personal",
+  ]);
+  assert.equal(top.code, 0, top.stderr);
+  const topSkillId = top.stdout.match(/skill_\S+(?= \(version)/)?.[0];
+
+  const loaded = await owner.run([
+    "search",
+    "search load integration sentinel quartz",
+    "--load",
+  ]);
+  assert.equal(loaded.code, 0, loaded.stderr);
+  assert.match(loaded.stdout, /# search-load-top-rust/);
+  assert.doesNotMatch(loaded.stdout, /search-load-secondary-rust/);
+  assert.doesNotMatch(loaded.stdout, /^1\. skill_/m);
+
+  const searchEvent = await created.sql.get(
+    "SELECT id FROM search_events WHERE query = $1 ORDER BY created_at DESC LIMIT 1",
+    ["search load integration sentinel quartz"],
+  );
+  const firstImpression = await created.sql.get(
+    "SELECT skill_id, rank FROM search_result_impressions WHERE search_event_id = $1 ORDER BY rank ASC LIMIT 1",
+    [searchEvent.id],
+  );
+  assert.equal(firstImpression.skill_id, topSkillId);
+  assert.equal(firstImpression.rank, 1);
+  const correlatedLoad = await created.sql.get(
+    "SELECT correlated_search_event_id FROM load_events WHERE skill_id = $1 ORDER BY created_at DESC LIMIT 1",
+    [topSkillId],
+  );
+  assert.equal(correlatedLoad.correlated_search_event_id, searchEvent.id);
+
+  const before = await created.sql.get(
+    "SELECT COUNT(*)::int AS n FROM load_events",
+  );
+  const empty = await owner.run([
+    "search",
+    "zzzxqvnonexistenttoken20260728",
+    "--load",
+  ]);
+  assert.equal(empty.code, 0, empty.stderr);
+  assert.match(empty.stdout, /No matching skills found\./);
+  const after = await created.sql.get(
+    "SELECT COUNT(*)::int AS n FROM load_events",
+  );
+  assert.equal(after.n, before.n);
+
+  const invalidConfig = await mkdtemp(
+    join(tmpdir(), "flockfly-rust-e2e-invalid-token-"),
+  );
+  temporaryDirectories.push(invalidConfig);
+  await writeFile(
+    join(invalidConfig, "credentials.json"),
+    `${JSON.stringify({ apiUrl: baseUrl, token: "ffly_invalid" }, null, 2)}\n`,
+  );
+  const failed = await runProcess(
+    ["search", "search load integration sentinel quartz", "--load"],
+    {
+      FLOCKFLY_API_URL: baseUrl,
+      FLOCKFLY_CONFIG_DIR: invalidConfig,
+    },
+  );
+  assert.equal(failed.code, 1);
+  assert.match(failed.stderr, /flockfly login/);
+});

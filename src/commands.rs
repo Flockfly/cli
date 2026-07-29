@@ -55,6 +55,9 @@ enum Command {
     Search {
         /// Task description to search for
         query: String,
+        /// Immediately load and print the highest-ranked skill
+        #[arg(long)]
+        load: bool,
     },
     /// Load SKILL.md (default) or specific files from a skill package
     Load {
@@ -173,7 +176,7 @@ fn execute(
             team,
             yes,
         } => publish(runtime, factory, &skill_directory, team.as_deref(), yes),
-        Command::Search { query } => {
+        Command::Search { query, load } => {
             let client = authed_client(runtime.env(), factory)?;
             let response = client.request("POST", "/v1/search", Some(json!({ "query": query })))?;
             let results = response
@@ -183,24 +186,20 @@ fn execute(
                 .iter()
                 .map(parse_search_result)
                 .collect::<Result<Vec<_>, _>>()?;
-            runtime.out(&format_search_results(&results));
+            if load {
+                if let Some(result) = results.iter().min_by_key(|result| result.rank) {
+                    runtime.out(&load_skill(client.as_ref(), &result.skill_id, &[])?);
+                } else {
+                    runtime.out(&format_search_results(&results));
+                }
+            } else {
+                runtime.out(&format_search_results(&results));
+            }
             Ok(())
         }
         Command::Load { skill_id, paths } => {
             let client = authed_client(runtime.env(), factory)?;
-            let response = client.request(
-                "POST",
-                &format!("/v1/skills/{}/load", urlencoding::encode(&skill_id)),
-                Some(json!({ "paths": paths })),
-            )?;
-            let files: Vec<LoadedFile> = serde_json::from_value(
-                response
-                    .get("files")
-                    .cloned()
-                    .ok_or_else(|| CliError::message("Invalid load response."))?,
-            )
-            .map_err(|error| CliError::message(error.to_string()))?;
-            runtime.out(&format_loaded_files(&files));
+            runtime.out(&load_skill(client.as_ref(), &skill_id, &paths)?);
             Ok(())
         }
         Command::Team {
@@ -443,6 +442,22 @@ fn parse_search_result(value: &Value) -> Result<SearchResult, CliError> {
         name: string_at(value, &["frontmatter", "name"])?,
         description: string_at(value, &["frontmatter", "description"])?,
     })
+}
+
+fn load_skill(client: &dyn Api, skill_id: &str, paths: &[String]) -> Result<String, CliError> {
+    let response = client.request(
+        "POST",
+        &format!("/v1/skills/{}/load", urlencoding::encode(skill_id)),
+        Some(json!({ "paths": paths })),
+    )?;
+    let files: Vec<LoadedFile> = serde_json::from_value(
+        response
+            .get("files")
+            .cloned()
+            .ok_or_else(|| CliError::message("Invalid load response."))?,
+    )
+    .map_err(|error| CliError::message(error.to_string()))?;
+    Ok(format_loaded_files(&files))
 }
 
 fn render_skill_rows(rows: &[Value]) -> Result<String, CliError> {

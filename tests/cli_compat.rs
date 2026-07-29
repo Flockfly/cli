@@ -15,6 +15,10 @@ struct Backend {
     token_email: HashMap<String, String>,
     skills: Vec<Skill>,
     next_skill: usize,
+    search_results: Option<Vec<Value>>,
+    search_error: Option<CliError>,
+    load_error: Option<CliError>,
+    load_requests: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -174,6 +178,12 @@ impl Api for FakeApi {
             }
             ("POST", "/v1/search") => {
                 let _email = self.email(&state)?;
+                if let Some(error) = state.search_error.clone() {
+                    return Err(error);
+                }
+                if let Some(results) = state.search_results.clone() {
+                    return Ok(json!({ "searchEventId": "search_1", "results": results }));
+                }
                 let results: Vec<_> = state
                     .skills
                     .iter()
@@ -198,6 +208,10 @@ impl Api for FakeApi {
                 let skill_id = path
                     .trim_start_matches("/v1/skills/")
                     .trim_end_matches("/load");
+                state.load_requests.push(skill_id.to_owned());
+                if let Some(error) = state.load_error.clone() {
+                    return Err(error);
+                }
                 let skill = state
                     .skills
                     .iter()
@@ -543,4 +557,132 @@ fn ts_lists_org_and_team_skills() {
     );
     assert_eq!(team_list.code, 0);
     assert!(team_list.stdout.contains("pdd v1"));
+}
+
+#[test]
+fn search_help_documents_the_load_flag() {
+    let result = Harness::new().run(&["search", "--help"], None, false);
+
+    assert_eq!(result.code, 0);
+    assert!(result.stdout.contains("--load"));
+}
+
+#[test]
+fn search_load_selects_the_best_rank_and_prints_raw_loaded_content() {
+    let harness = Harness::new();
+    harness.login("search-load@example.com");
+    harness.run(
+        &[
+            "publish",
+            &harness.fixture("pdd"),
+            "--team",
+            "search-load's personal",
+        ],
+        None,
+        false,
+    );
+    harness.run(
+        &[
+            "publish",
+            &harness.fixture("codebase-summary"),
+            "--team",
+            "search-load's personal",
+        ],
+        None,
+        false,
+    );
+    harness.state.lock().unwrap().search_results = Some(vec![
+        json!({
+            "rank": 2,
+            "skillId": "skill_1",
+            "score": 80,
+            "frontmatter": { "name": "pdd", "description": "Plan." }
+        }),
+        json!({
+            "rank": 1,
+            "skillId": "skill_2",
+            "score": 100,
+            "frontmatter": { "name": "codebase-summary", "description": "Analyze." }
+        }),
+    ]);
+
+    let result = harness.run(&["search", "analyze code", "--load"], None, false);
+
+    assert_eq!(result.code, 0);
+    assert!(result.stdout.contains("# Codebase Summary"));
+    assert!(!result.stdout.contains("1. skill_2"));
+    assert_eq!(harness.state.lock().unwrap().load_requests, vec!["skill_2"]);
+    let standalone = harness.run(&["load", "skill_2"], None, false);
+    assert_eq!(result.stdout, standalone.stdout);
+}
+
+#[test]
+fn search_without_load_keeps_ranked_output_and_does_not_load() {
+    let harness = Harness::new();
+    harness.login("ordinary-search@example.com");
+    harness.run(
+        &[
+            "publish",
+            &harness.fixture("pdd"),
+            "--team",
+            "ordinary-search's personal",
+        ],
+        None,
+        false,
+    );
+
+    let result = harness.run(&["search", "plan work"], None, false);
+
+    assert_eq!(result.code, 0);
+    assert!(result.stdout.contains("1. skill_1"));
+    assert!(result.stdout.contains("name: pdd"));
+    assert!(harness.state.lock().unwrap().load_requests.is_empty());
+}
+
+#[test]
+fn search_load_preserves_empty_results_without_a_load_request() {
+    let harness = Harness::new();
+    harness.login("empty-search@example.com");
+
+    let result = harness.run(&["search", "nothing matches", "--load"], None, false);
+
+    assert_eq!(result.code, 0);
+    assert_eq!(result.stdout, "No matching skills found.");
+    assert!(harness.state.lock().unwrap().load_requests.is_empty());
+}
+
+#[test]
+fn search_load_propagates_search_api_failures_without_loading() {
+    let harness = Harness::new();
+    harness.login("search-failure@example.com");
+    harness.state.lock().unwrap().search_error = Some(CliError::message("Search unavailable."));
+
+    let result = harness.run(&["search", "anything", "--load"], None, false);
+
+    assert_eq!(result.code, 1);
+    assert!(result.stderr.contains("Error: Search unavailable."));
+    assert!(harness.state.lock().unwrap().load_requests.is_empty());
+}
+
+#[test]
+fn search_load_propagates_load_api_failures() {
+    let harness = Harness::new();
+    harness.login("load-failure@example.com");
+    harness.run(
+        &[
+            "publish",
+            &harness.fixture("pdd"),
+            "--team",
+            "load-failure's personal",
+        ],
+        None,
+        false,
+    );
+    harness.state.lock().unwrap().load_error = Some(CliError::message("Load unavailable."));
+
+    let result = harness.run(&["search", "plan work", "--load"], None, false);
+
+    assert_eq!(result.code, 1);
+    assert!(result.stderr.contains("Error: Load unavailable."));
+    assert_eq!(harness.state.lock().unwrap().load_requests, vec!["skill_1"]);
 }

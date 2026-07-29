@@ -39,6 +39,7 @@ flockfly init
 flockfly publish ./my-skill
 flockfly publish ./my-skill --team engineering
 flockfly search "prepare an incident review"
+flockfly search "prepare an incident review" --load
 flockfly load skill_abc123
 flockfly load skill_abc123 references/guide.md
 flockfly team add --skill skill_abc123 --team engineering
@@ -48,6 +49,8 @@ flockfly skills list --team engineering
 ```
 
 A published skill directory must contain `SKILL.md` with `name` and `description` YAML frontmatter. Symlinks that leave the package directory are rejected.
+
+`search --load` loads and prints the highest-ranked match immediately. Its output is the same raw `SKILL.md` content produced by `flockfly load <skill-id>`. If nothing matches, it prints `No matching skills found.` without issuing a load request.
 
 ## Configuration
 

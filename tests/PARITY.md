@@ -33,5 +33,14 @@ The separately classified original E2E cases are also ported in `tests/e2e/real-
 - `TS E2E: covers the full team journey with visibility rules and telemetry`
 - `TS E2E: replaces a skill after confirmation and search returns the new version`
 
-Current evidence is recorded in `.code-assist/flockfly-cli-rust-distribution/progress.md`.
+Additive Rust coverage for `search --load` preserves the original 21-case mapping and verifies:
 
+- Clap help and parsing for `search "<query>" --load`
+- explicit best-rank selection independent of response order
+- byte-for-byte parity with standalone default load rendering
+- unchanged ordinary search and no-result behavior
+- no load request for empty results
+- search- and load-stage API failure propagation
+- real-API top selection, correlated telemetry, empty results, and authentication failure
+
+Current evidence is recorded in `.code-assist/flockfly-cli-rust-distribution/progress.md`.
