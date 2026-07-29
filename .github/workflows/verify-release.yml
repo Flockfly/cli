@@ -14,4 +14,5 @@ jobs:
       - name: Install installer prerequisites
         run: apt-get update && apt-get install -y curl ca-certificates xz-utils
       - run: bash tests/integration/verify-install.sh
-
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
