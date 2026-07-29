@@ -1,0 +1,51 @@
+[package]
+name = "flockfly"
+version = "0.1.0"
+edition = "2021"
+description = "Flockfly context router CLI"
+repository = "https://github.com/flockfly/cli"
+homepage = "https://github.com/flockfly/cli"
+license = "MIT"
+
+[[bin]]
+name = "flockfly"
+path = "src/main.rs"
+
+[lib]
+name = "flockfly"
+path = "src/lib.rs"
+
+[dependencies]
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "2"
+urlencoding = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[workspace.metadata.dist]
+cargo-dist-version = "0.31.0"
+ci = ["github"]
+installers = ["shell", "homebrew"]
+install-path = "~/.local/bin"
+tap = "flockfly/homebrew-tap"
+publish-jobs = ["homebrew"]
+targets = [
+  "aarch64-apple-darwin",
+  "aarch64-unknown-linux-gnu",
+  "aarch64-unknown-linux-musl",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+]
+pr-run-mode = "plan"
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
