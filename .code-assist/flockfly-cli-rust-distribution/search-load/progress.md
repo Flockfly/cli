@@ -18,7 +18,7 @@
 - [x] Pass complete Rust parity and safety suite.
 - [x] Pass real-API E2E suite.
 - [x] Pass formatting, Clippy, release build, smoke, and distribution gates.
-- [ ] Commit and record the commit hash.
+- [x] Commit and record the commit hash.
 
 ## TDD Cycles
 
@@ -55,7 +55,9 @@
 - `dist generate --check`: passed.
 - `dist plan`: passed for all six configured targets plus shell/Homebrew installers.
 - Pre-commit ARM64 macOS local artifact build: passed.
+- Post-commit cargo-dist host build: passed; generated target/source archives, shell installer, Homebrew formula, and checksums.
+- Target and source archive checksums passed, and the source archive contains the committed `--load` implementation.
 
 ## Commit
 
-- Pending.
+- `0d9d2b4` — `feat: load top search result`

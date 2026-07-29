@@ -21,4 +21,4 @@
 - [x] Run focused tests to GREEN and refactor without changing output.
 - [x] Update README and parity documentation.
 - [x] Run formatting, full Rust tests, real-API E2E, Clippy, release build/smoke, cargo-dist generation/plan/artifact validation.
-- [ ] Commit only after every gate passes.
+- [x] Commit only after every gate passes.
