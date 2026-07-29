@@ -20,7 +20,7 @@
 - [x] Port/pass the 2 original E2E cases.
 - [x] Add and validate distribution/CI/documentation.
 - [x] Run final format, clippy, full tests, build, and smoke checks.
-- [ ] Commit completed implementation.
+- [x] Commit completed implementation.
 
 ## TDD Cycles
 
@@ -66,8 +66,9 @@
 - `dist generate --check`: passed.
 - `dist plan`: passed and listed all six configured archives, shell installer, Homebrew formula, checksums, and source archive.
 - `dist build --artifacts=local --target aarch64-apple-darwin --allow-dirty`: passed; checksum and archive contents verified.
-- A host/global dry run built the target archive but could not create `source.tar.gz` because this new repository had no `HEAD`. This is resolved by the initial commit and did not affect local target artifact validation.
+- Before the initial commit, a host/global dry run could not create `source.tar.gz` because the new repository had no `HEAD`.
+- After the initial commit, the complete host dry run passed and generated the target archive, source archive, shell installer, Homebrew formula, and aggregate checksums.
 
 ## Commit
 
-- Pending.
+- `973c70f` — `feat: port Flockfly CLI to Rust`
