@@ -1,0 +1,17 @@
+name: Verify Release Install
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  verify-install:
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install installer prerequisites
+        run: apt-get update && apt-get install -y curl ca-certificates xz-utils
+      - run: bash tests/integration/verify-install.sh
+
