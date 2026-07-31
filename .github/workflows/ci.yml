@@ -25,6 +25,13 @@ jobs:
       - run: cargo build --release --locked
       - run: bash tests/integration/smoke.sh target/release/flockfly
 
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: docker build -t flockfly-integration -f tests/integration/Dockerfile .
+      - run: docker run --rm flockfly-integration
+
   distribution-plan:
     runs-on: ubuntu-latest
     steps:
