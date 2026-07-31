@@ -4,7 +4,7 @@ The Flockfly CLI publishes, searches, and progressively loads team skill package
 
 ## Install
 
-After the first public release, install the latest macOS or Linux binary with:
+Install the latest macOS or Linux binary with:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf \
@@ -13,13 +13,11 @@ curl --proto '=https' --tlsv1.2 -LsSf \
 
 The installer places `flockfly` in `~/.local/bin`. Make sure that directory is on `PATH`.
 
-Homebrew installation will be available from the Flockfly tap:
+Or install via Homebrew from the Flockfly tap:
 
 ```sh
 brew install flockfly/tap/flockfly
 ```
-
-No public release has been authorized yet; until one exists, build from source.
 
 ## Build from source
 
@@ -96,4 +94,4 @@ FLOCKFLY_CONTEXT_ROUTER_DIR=/path/to/context-router \
   node --test tests/e2e/real-api.test.mjs
 ```
 
-See [MIGRATION.md](MIGRATION.md) for the TypeScript fallback/cutover policy and [RELEASE.md](RELEASE.md) for the release checklist.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow, [MIGRATION.md](MIGRATION.md) for the TypeScript fallback/cutover policy, and [RELEASE.md](RELEASE.md) for the release checklist.
