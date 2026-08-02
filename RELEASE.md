@@ -26,7 +26,7 @@ Public release actions require explicit product-owner approval. Preparing and va
   ```
 
 - `cargo install --path .` produces a working binary (`flockfly --version` prints the expected version).
-- **Run the real-API e2e suite.** This is a hard requirement, not optional polish: it is the only coverage that exercises publish/search/load/team flows against a live API. It must always run with the API URL overridden to a local Context Router instance - `tests/e2e/real-api.test.mjs` does this automatically for every request it makes (`FLOCKFLY_API_URL` is set to the in-process local server's address before each CLI invocation), so it can never accidentally hit production. Run it with the Context Router checkout available:
+- **Run the real-API e2e suite.** This is a hard requirement, not optional polish: it is the only coverage that exercises publish/search/load/router flows against a live API. It must always run with the API URL overridden to a local Context Router instance - `tests/e2e/real-api.test.mjs` does this automatically for every request it makes (`FLOCKFLY_API_URL` is set to the in-process local server's address before each CLI invocation), so it can never accidentally hit production. Run it with the Context Router checkout available:
 
   ```sh
   FLOCKFLY_CONTEXT_ROUTER_DIR=/path/to/context-router \
@@ -44,7 +44,7 @@ Follow [Semantic Versioning](https://semver.org/):
 | Change type | Example | Version bump |
 |---|---|---|
 | Bug fix, docs, internals | Fix search ranking tie-break | Patch — `0.1.0 → 0.1.1` |
-| New command or flag, new config key | Add `flockfly skills list --team` | Minor — `0.1.0 → 0.2.0` |
+| New command or flag, new config key | Add `flockfly skills list --router` | Minor — `0.1.0 → 0.2.0` |
 | Breaking CLI change, API contract change | Rename `--load` flag, change `credentials.json` schema | Major — `0.1.0 → 1.0.0` |
 
 **When in doubt, bump minor.** It is always safe to do so.

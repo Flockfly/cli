@@ -8,7 +8,7 @@ The TypeScript CLI remains the behavior reference and fallback until a Rust rele
 2. Require all transferred Rust tests, Clippy, formatting, and release builds to pass on macOS and Linux.
 3. Run `node --test tests/e2e/real-api.test.mjs` against a clean local Context API checkout.
 4. Run `dist generate --check` and `dist plan`.
-5. Install a release candidate into a clean environment and exercise login, whoami, publish, search, load, team attachment, and list operations against a non-production API.
+5. Install a release candidate into a clean environment and exercise login, whoami, publish, search, load, router attachment, and list operations against a non-production API.
 6. Compare stdout, stderr, and exit codes from the TypeScript and Rust CLIs for the same scripted inputs.
 
 ## Safe rollout

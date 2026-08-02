@@ -49,14 +49,14 @@ echo "$OUT" | grep -qF "$NOT_LOGGED_IN" && pass "search refuses without credenti
 OUT=$(flockfly load skill_abc 2>&1 || true)
 echo "$OUT" | grep -qF "$NOT_LOGGED_IN" && pass "load refuses without credentials" || fail "load refuses without credentials"
 
-OUT=$(flockfly teams list 2>&1 || true)
-echo "$OUT" | grep -qF "$NOT_LOGGED_IN" && pass "teams list refuses without credentials" || fail "teams list refuses without credentials"
+OUT=$(flockfly routers list 2>&1 || true)
+echo "$OUT" | grep -qF "$NOT_LOGGED_IN" && pass "routers list refuses without credentials" || fail "routers list refuses without credentials"
 
 OUT=$(flockfly skills list 2>&1 || true)
 echo "$OUT" | grep -qF "$NOT_LOGGED_IN" && pass "skills list refuses without credentials" || fail "skills list refuses without credentials"
 
-OUT=$(flockfly team add --skill skill_abc --team eng 2>&1 || true)
-echo "$OUT" | grep -qF "$NOT_LOGGED_IN" && pass "team add refuses without credentials" || fail "team add refuses without credentials"
+OUT=$(flockfly router add --skill skill_abc --router eng 2>&1 || true)
+echo "$OUT" | grep -qF "$NOT_LOGGED_IN" && pass "router add refuses without credentials" || fail "router add refuses without credentials"
 
 # publish authenticates before it validates the skill directory, so a
 # nonexistent directory should still surface the auth error, not a
