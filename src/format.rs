@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub const INIT_SNIPPET: &str = r#"## Flockfly Skills
 
-Before starting substantial knowledge work, search for relevant team skills:
+Before starting substantial knowledge work, search your routed skills:
 
 `flockfly search "<task>"`
 

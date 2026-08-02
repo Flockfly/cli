@@ -1,6 +1,6 @@
 # Flockfly CLI
 
-The Flockfly CLI publishes, searches, and progressively loads team skill packages. It is a native Rust binary and does not require Node.js.
+The Flockfly CLI publishes, searches, and progressively loads skill packages. It is a native Rust binary and does not require Node.js.
 
 ## Install
 
@@ -35,18 +35,18 @@ flockfly login
 flockfly whoami
 flockfly init
 flockfly publish ./my-skill
-flockfly publish ./my-skill --team engineering
+flockfly publish ./my-skill --router engineering
 flockfly search "prepare an incident review"
 flockfly search "prepare an incident review" --load
 flockfly load skill_abc123
 flockfly load skill_abc123 references/guide.md
-flockfly team add --skill skill_abc123 --team engineering
-flockfly teams list
-flockfly skills list --org
-flockfly skills list --team engineering
+flockfly router add --skill skill_abc123 --router engineering
+flockfly routers list
+flockfly skills list
+flockfly skills list --router engineering
 ```
 
-A published skill directory must contain `SKILL.md` with `name` and `description` YAML frontmatter. Symlinks that leave the package directory are rejected.
+A published skill directory must contain `SKILL.md` with `name` and `description` YAML frontmatter. Symlinks that leave the package directory are rejected. `publish` always targets the public skill collection; `--router` additionally attaches the published skill to a router so agents routed to it can find it immediately.
 
 `search --load` loads and prints the highest-ranked match immediately. Its output is the same raw `SKILL.md` content produced by `flockfly load <skill-id>`. If nothing matches, it prints `No matching skills found.` without issuing a load request.
 

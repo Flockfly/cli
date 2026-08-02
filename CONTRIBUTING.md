@@ -68,7 +68,7 @@ FLOCKFLY_CONTEXT_ROUTER_DIR=/path/to/context-router \
   node --test tests/e2e/real-api.test.mjs
 ```
 
-The only coverage that exercises publish/search/load/team flows against a live API. It always runs with `FLOCKFLY_API_URL` overridden to a local, in-process Context Router instance - it can never hit production. Requires a local Context Router checkout, so it isn't part of CI; it's a required step before tagging a release (see `RELEASE.md`).
+The only coverage that exercises publish/search/load/router flows against a live API. It always runs with `FLOCKFLY_API_URL` overridden to a local, in-process Context Router instance - it can never hit production. Requires a local Context Router checkout, so it isn't part of CI; it's a required step before tagging a release (see `RELEASE.md`).
 
 ## Project structure
 

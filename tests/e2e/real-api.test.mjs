@@ -13,6 +13,8 @@ const binary =
   process.env.FLOCKFLY_BIN ??
   resolve(import.meta.dirname, "../../target/debug/flockfly");
 
+const PUBLIC_COLLECTION_ID = "coll_public";
+
 let created;
 let server;
 let baseUrl;
@@ -48,6 +50,27 @@ after(async () => {
     ),
   );
 });
+
+// The production public-collection publisher allowlist only covers
+// jonathan@flockfly.ai; grant test users publish access directly.
+async function grantPublish(email) {
+  const user = await created.sql.get(
+    "SELECT id FROM users WHERE email = $1",
+    [email],
+  );
+  await created.sql.run(
+    `INSERT INTO entity_access (id, entity_type, entity_id, email, user_id, access_type, status, granted_by_user_id, created_at)
+     VALUES ($1, 'collection', $2, $3, $4, 'create', 'active', $4, $5)
+     ON CONFLICT (entity_type, entity_id, email, access_type) DO NOTHING`,
+    [
+      `acc_rust_e2e_${user.id}`,
+      PUBLIC_COLLECTION_ID,
+      email,
+      user.id,
+      new Date().toISOString(),
+    ],
+  );
+}
 
 async function runProcess(args, env, { approveEmail, input } = {}) {
   return new Promise((resolveRun, rejectRun) => {
@@ -125,56 +148,57 @@ async function writeSkillDirectory(name, description) {
   return directory;
 }
 
-test("TS E2E: covers the full team journey with visibility rules and telemetry", async () => {
+test("TS E2E: covers the full router journey with visibility rules and telemetry", async () => {
   const jane = await loginSession("jane@rust-e2e.dev");
-  const { team } = await jane.api("POST", "/v1/teams", { name: "eng-rust" });
-  await jane.api("POST", `/v1/teams/${team.id}/members`, {
+  await grantPublish("jane@rust-e2e.dev");
+  const { router } = await jane.api("POST", "/v1/routers", { name: "eng-rust" });
+  await jane.api("POST", `/v1/routers/${router.id}/members`, {
     email: "sam@rust-e2e.dev",
   });
 
-  const teamSkillDir = await writeSkillDirectory(
+  const routerSkillDir = await writeSkillDirectory(
     "incident-runbook-rust",
     "How to handle production incidents.",
   );
   const published = await jane.run([
     "publish",
-    teamSkillDir,
-    "--team",
+    routerSkillDir,
+    "--router",
     "eng-rust",
   ]);
   assert.equal(published.code, 0, published.stderr);
-  const teamSkillId = published.stdout.match(/skill_\S+(?= \(version)/)?.[0];
-  assert.match(teamSkillId, /^skill_/);
+  const routerSkillId = published.stdout.match(/skill_\S+(?= \(version)/)?.[0];
+  assert.match(routerSkillId, /^skill_/);
 
-  const orgOnlyDir = await writeSkillDirectory(
+  const unroutedDir = await writeSkillDirectory(
     "quarterly-report-rust",
     "Quarterly reporting workflow.",
   );
-  const orgOnly = await jane.run(["publish", orgOnlyDir]);
-  const orgOnlySkillId = orgOnly.stdout.match(/skill_\S+(?= \(version)/)?.[0];
+  const unrouted = await jane.run(["publish", unroutedDir]);
+  const unroutedSkillId = unrouted.stdout.match(/skill_\S+(?= \(version)/)?.[0];
 
   const sam = await loginSession("sam@rust-e2e.dev");
-  const samTeams = await sam.run(["teams", "list"]);
-  assert.match(samTeams.stdout, /eng-rust/);
+  const samRouters = await sam.run(["routers", "list"]);
+  assert.match(samRouters.stdout, /eng-rust/);
 
   const search = await sam.run(["search", "handle production incidents"]);
   assert.equal(search.code, 0, search.stderr);
-  assert.match(search.stdout, new RegExp(teamSkillId));
-  assert.doesNotMatch(search.stdout, new RegExp(orgOnlySkillId));
+  assert.match(search.stdout, new RegExp(routerSkillId));
+  assert.doesNotMatch(search.stdout, new RegExp(unroutedSkillId));
 
-  const orgList = await sam.run(["skills", "list", "--org"]);
-  assert.match(orgList.stdout, /quarterly-report-rust/);
-  const deniedLoad = await sam.run(["load", orgOnlySkillId]);
+  const collectionList = await sam.run(["skills", "list"]);
+  assert.match(collectionList.stdout, /quarterly-report-rust/);
+  const deniedLoad = await sam.run(["load", unroutedSkillId]);
   assert.equal(deniedLoad.code, 1);
   assert.match(deniedLoad.stderr, /not attached/);
 
-  const load = await sam.run(["load", teamSkillId]);
+  const load = await sam.run(["load", routerSkillId]);
   assert.equal(load.code, 0, load.stderr);
   assert.match(load.stdout, /# incident-runbook-rust/);
   assert.doesNotMatch(load.stdout, /# incident-runbook-rust guide/);
   const refLoad = await sam.run([
     "load",
-    teamSkillId,
+    routerSkillId,
     "references/guide.md",
   ]);
   assert.match(refLoad.stdout, /# incident-runbook-rust guide/);
@@ -191,14 +215,14 @@ test("TS E2E: covers the full team journey with visibility rules and telemetry",
   assert.equal(impressions[0].rank, 1);
   const loads = await created.sql.all(
     "SELECT * FROM load_events WHERE skill_id = $1 ORDER BY created_at ASC",
-    [teamSkillId],
+    [routerSkillId],
   );
   assert.equal(loads.length, 2);
   assert.equal(loads[0].correlated_search_event_id, searchEvent.id);
 
   const feedback = await sam.api(
     "POST",
-    `/v1/skills/${teamSkillId}/feedback`,
+    `/v1/skills/${routerSkillId}/feedback`,
     { value: "up" },
   );
   assert.deepEqual(feedback, { mine: "up", up: 1, down: 0 });
@@ -206,6 +230,7 @@ test("TS E2E: covers the full team journey with visibility rules and telemetry",
 
 test("TS E2E: replaces a skill after confirmation and search returns the new version", async () => {
   const owner = await loginSession("replace@rust-e2e.dev");
+  await grantPublish("replace@rust-e2e.dev");
   const versionOne = await writeSkillDirectory(
     "design-review-rust",
     "Original review checklist.",
@@ -213,8 +238,8 @@ test("TS E2E: replaces a skill after confirmation and search returns the new ver
   const publishedOne = await owner.run([
     "publish",
     versionOne,
-    "--team",
-    "replace's personal",
+    "--router",
+    "replace's router",
   ]);
   assert.equal(publishedOne.code, 0, publishedOne.stderr);
 
@@ -237,6 +262,7 @@ test("TS E2E: replaces a skill after confirmation and search returns the new ver
 
 test("search --load selects and renders the top real-API result without loading empty results", async () => {
   const owner = await loginSession("search-load@rust-e2e.dev");
+  await grantPublish("search-load@rust-e2e.dev");
   const secondaryDirectory = await writeSkillDirectory(
     "search-load-secondary-rust",
     "A generic workflow unrelated to the quartz sentinel.",
@@ -244,8 +270,8 @@ test("search --load selects and renders the top real-API result without loading 
   const secondary = await owner.run([
     "publish",
     secondaryDirectory,
-    "--team",
-    "search-load's personal",
+    "--router",
+    "search-load's router",
   ]);
   assert.equal(secondary.code, 0, secondary.stderr);
 
@@ -256,8 +282,8 @@ test("search --load selects and renders the top real-API result without loading 
   const top = await owner.run([
     "publish",
     topDirectory,
-    "--team",
-    "search-load's personal",
+    "--router",
+    "search-load's router",
   ]);
   assert.equal(top.code, 0, top.stderr);
   const topSkillId = top.stdout.match(/skill_\S+(?= \(version)/)?.[0];

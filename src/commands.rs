@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -25,7 +25,7 @@ pub trait Runtime {
 #[command(
     name = "flockfly",
     version,
-    about = "Flockfly context router CLI: publish, search, and load team skills."
+    about = "Flockfly context router CLI: publish, search, and load skills."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -40,18 +40,18 @@ enum Command {
     Whoami,
     /// Print the snippet to add to CLAUDE.md or AGENTS.md
     Init,
-    /// Publish a skill package directory
+    /// Publish a skill package directory to the public collection
     Publish {
         /// Directory containing SKILL.md plus referenced files
         skill_directory: String,
-        /// Also attach the published skill to this team
+        /// Also attach the published skill to this router
         #[arg(long)]
-        team: Option<String>,
+        router: Option<String>,
         /// Replace an existing skill with the same name without prompting
         #[arg(long)]
         yes: bool,
     },
-    /// Search your visible skills
+    /// Search skills routed to you
     Search {
         /// Task description to search for
         query: String,
@@ -66,15 +66,15 @@ enum Command {
         /// Package paths to load instead of SKILL.md
         paths: Vec<String>,
     },
-    /// Manage team skills
-    Team {
+    /// Manage router skills
+    Router {
         #[command(subcommand)]
-        command: TeamCommand,
+        command: RouterCommand,
     },
-    /// Work with your teams
-    Teams {
+    /// Work with your routers
+    Routers {
         #[command(subcommand)]
-        command: TeamsCommand,
+        command: RoutersCommand,
     },
     /// Work with skills
     Skills {
@@ -84,34 +84,31 @@ enum Command {
 }
 
 #[derive(Subcommand)]
-enum TeamCommand {
-    /// Attach an existing org skill to a team
+enum RouterCommand {
+    /// Attach an existing skill to a router
     Add {
         /// Skill ID
         #[arg(long)]
         skill: String,
-        /// Team ID or name
+        /// Router ID or name
         #[arg(long)]
-        team: String,
+        router: String,
     },
 }
 
 #[derive(Subcommand)]
-enum TeamsCommand {
-    /// List teams you belong to
+enum RoutersCommand {
+    /// List routers you belong to
     List,
 }
 
 #[derive(Subcommand)]
 enum SkillsCommand {
-    /// List org skills, or a team's skills with --team
+    /// List public-collection skills, or a router's skills with --router
     List {
-        /// List all org skills (default)
+        /// List skills attached to a router
         #[arg(long)]
-        org: bool,
-        /// List skills attached to a team
-        #[arg(long)]
-        team: Option<String>,
+        router: Option<String>,
     },
 }
 
@@ -173,9 +170,9 @@ fn execute(
         }
         Command::Publish {
             skill_directory,
-            team,
+            router,
             yes,
-        } => publish(runtime, factory, &skill_directory, team.as_deref(), yes),
+        } => publish(runtime, factory, &skill_directory, router.as_deref(), yes),
         Command::Search { query, load } => {
             let client = authed_client(runtime.env(), factory)?;
             let response = client.request("POST", "/v1/search", Some(json!({ "query": query })))?;
@@ -202,73 +199,69 @@ fn execute(
             runtime.out(&load_skill(client.as_ref(), &skill_id, &paths)?);
             Ok(())
         }
-        Command::Team {
-            command: TeamCommand::Add { skill, team },
+        Command::Router {
+            command: RouterCommand::Add { skill, router },
         } => {
             let client = authed_client(runtime.env(), factory)?;
-            let team_id = resolve_team_id(client.as_ref(), &team)?;
+            let router_id = resolve_router_id(client.as_ref(), &router)?;
             client.request(
                 "POST",
                 &format!(
-                    "/v1/teams/{}/skills/{}",
-                    urlencoding::encode(&team_id),
+                    "/v1/routers/{}/skills/{}",
+                    urlencoding::encode(&router_id),
                     urlencoding::encode(&skill)
                 ),
                 None,
             )?;
-            runtime.out(&format!("Attached {skill} to team {team}."));
+            runtime.out(&format!("Attached {skill} to router {router}."));
             Ok(())
         }
-        Command::Teams {
-            command: TeamsCommand::List,
+        Command::Routers {
+            command: RoutersCommand::List,
         } => {
             let client = authed_client(runtime.env(), factory)?;
-            let response = client.request("GET", "/v1/teams", None)?;
-            let teams = response
-                .get("teams")
+            let response = client.request("GET", "/v1/routers", None)?;
+            let routers = response
+                .get("routers")
                 .and_then(Value::as_array)
-                .ok_or_else(|| CliError::message("Invalid teams response."))?;
-            if teams.is_empty() {
-                runtime.out("You have no teams yet.");
+                .ok_or_else(|| CliError::message("Invalid routers response."))?;
+            if routers.is_empty() {
+                runtime.out("You have no routers yet.");
                 return Ok(());
             }
-            let rows = teams
+            let rows = routers
                 .iter()
-                .map(|team| {
-                    let id = string_at(team, &["id"])?;
-                    let name = string_at(team, &["name"])?;
-                    let personal = if team.get("kind").and_then(Value::as_str) == Some("personal") {
-                        "[personal] "
-                    } else {
-                        ""
-                    };
-                    Ok(format!("{id}  {personal}{name}"))
+                .map(|router| {
+                    let id = string_at(router, &["id"])?;
+                    let name = string_at(router, &["name"])?;
+                    Ok(format!("{id}  {name}"))
                 })
                 .collect::<Result<Vec<_>, CliError>>()?;
             runtime.out(&rows.join("\n"));
             Ok(())
         }
         Command::Skills {
-            command: SkillsCommand::List { org: _, team },
+            command: SkillsCommand::List { router },
         } => {
             let client = authed_client(runtime.env(), factory)?;
-            let response = if let Some(team) = team {
-                let team_id = resolve_team_id(client.as_ref(), &team)?;
-                client.request(
-                    "GET",
-                    &format!("/v1/teams/{}/skills", urlencoding::encode(&team_id)),
-                    None,
+            let rows = if let Some(router) = router {
+                let router_id = resolve_router_id(client.as_ref(), &router)?;
+                fetch_all_skill_pages(
+                    client.as_ref(),
+                    &format!("/v1/routers/{}/skills", urlencoding::encode(&router_id)),
                 )?
             } else {
-                let me = client.request("GET", "/v1/me", None)?;
-                let org_id = string_at(&me, &["org", "id"])?;
-                client.request("GET", &format!("/v1/orgs/{org_id}/skills"), None)?
+                let collection = require_public_collection(client.as_ref())?;
+                let collection_id = string_at(&collection, &["id"])?;
+                fetch_all_skill_pages(
+                    client.as_ref(),
+                    &format!(
+                        "/v1/collections/{}/skills",
+                        urlencoding::encode(&collection_id)
+                    ),
+                )?
             };
-            let skills = response
-                .get("skills")
-                .and_then(Value::as_array)
-                .ok_or_else(|| CliError::message("Invalid skills response."))?;
-            runtime.out(&render_skill_rows(skills)?);
+            runtime.out(&render_skill_rows(&rows)?);
             Ok(())
         }
     }
@@ -329,27 +322,31 @@ fn publish(
     runtime: &mut dyn Runtime,
     factory: &dyn ApiFactory,
     directory: &str,
-    team: Option<&str>,
+    router: Option<&str>,
     yes: bool,
 ) -> Result<(), CliError> {
     let client = authed_client(runtime.env(), factory)?;
-    let me = client.request("GET", "/v1/me", None)?;
-    let org_id = string_at(&me, &["org", "id"])?;
     let packaged = package_skill_directory(Path::new(directory))?;
-    let team_id = team
-        .map(|team| resolve_team_id(client.as_ref(), team))
+    let collection = require_public_collection(client.as_ref())?;
+    let collection_id = string_at(&collection, &["id"])?;
+    let router_id = router
+        .map(|router| resolve_router_id(client.as_ref(), router))
         .transpose()?;
 
     let publish_once = |replace_skill_id: Option<&str>| {
         let mut body = json!({ "files": packaged.files });
-        if let Some(team_id) = &team_id {
-            body["teamId"] = Value::String(team_id.clone());
+        if let Some(router_id) = &router_id {
+            body["routerId"] = Value::String(router_id.clone());
         }
         if let Some(replace_skill_id) = replace_skill_id {
             body["replaceSkillId"] = Value::String(replace_skill_id.to_owned());
             body["confirmReplace"] = Value::Bool(true);
         }
-        client.request("POST", &format!("/v1/orgs/{org_id}/skills"), Some(body))
+        client.request(
+            "POST",
+            &format!("/v1/collections/{collection_id}/skills"),
+            Some(body),
+        )
     };
 
     let result = match publish_once(None) {
@@ -390,12 +387,12 @@ fn publish(
         value_at(&result, &["version", "version"])?
     ));
     if result
-        .get("attachedTeamId")
+        .get("attachedRouterId")
         .is_some_and(|value| !value.is_null())
     {
         runtime.out(&format!(
-            "Attached to team {}.",
-            team.unwrap_or("undefined")
+            "Attached to router {}.",
+            router.unwrap_or("undefined")
         ));
     }
     Ok(())
@@ -410,26 +407,80 @@ fn authed_client(
     Ok(factory.create(&credentials.api_url, Some(&credentials.token)))
 }
 
-fn resolve_team_id(client: &dyn Api, id_or_name: &str) -> Result<String, CliError> {
-    let response = client.request("GET", "/v1/teams", None)?;
-    let teams = response
-        .get("teams")
+// Accepts a router ID or router name and resolves it against the user's routers.
+fn resolve_router_id(client: &dyn Api, id_or_name: &str) -> Result<String, CliError> {
+    let response = client.request("GET", "/v1/routers", None)?;
+    let routers = response
+        .get("routers")
         .and_then(Value::as_array)
-        .ok_or_else(|| CliError::message("Invalid teams response."))?;
-    teams
+        .ok_or_else(|| CliError::message("Invalid routers response."))?;
+    routers
         .iter()
-        .find(|team| {
-            team.get("id").and_then(Value::as_str) == Some(id_or_name)
-                || team.get("name").and_then(Value::as_str) == Some(id_or_name)
+        .find(|router| {
+            router.get("id").and_then(Value::as_str) == Some(id_or_name)
+                || router.get("name").and_then(Value::as_str) == Some(id_or_name)
         })
-        .and_then(|team| team.get("id"))
+        .and_then(|router| router.get("id"))
         .and_then(Value::as_str)
         .map(str::to_owned)
         .ok_or_else(|| {
             CliError::message(format!(
-                "Team not found: {id_or_name}. Run `flockfly teams list` to see your teams."
+                "Router not found: {id_or_name}. Run `flockfly routers list` to see your routers."
             ))
         })
+}
+
+fn require_public_collection(client: &dyn Api) -> Result<Value, CliError> {
+    let response = client.request("GET", "/v1/collections", None)?;
+    let collections = response
+        .get("collections")
+        .and_then(Value::as_array)
+        .ok_or_else(|| CliError::message("Invalid collections response."))?;
+    collections
+        .iter()
+        .find(|collection| collection.get("kind").and_then(Value::as_str) == Some("public"))
+        .cloned()
+        .ok_or_else(|| CliError::message("No public collection is available to publish into."))
+}
+
+// Loops a cursor-paginated GET endpoint (100 rows/page) until exhausted.
+fn fetch_all_skill_pages(client: &dyn Api, path: &str) -> Result<Vec<Value>, CliError> {
+    let mut rows = Vec::new();
+    let mut seen_cursors = HashSet::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let separator = if path.contains('?') { "&" } else { "?" };
+        let page_path = match &cursor {
+            Some(cursor) => format!(
+                "{path}{separator}limit=100&cursor={}",
+                urlencoding::encode(cursor)
+            ),
+            None => format!("{path}{separator}limit=100"),
+        };
+        let page = client.request("GET", &page_path, None)?;
+        let skills = page
+            .get("skills")
+            .and_then(Value::as_array)
+            .ok_or_else(|| CliError::message("Invalid skills response."))?;
+        rows.extend(skills.iter().cloned());
+        let next_cursor = page
+            .get("page")
+            .and_then(|page| page.get("nextCursor"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        match next_cursor {
+            Some(next) => {
+                if !seen_cursors.insert(next.clone()) {
+                    return Err(CliError::message(
+                        "The API returned a repeated page cursor.",
+                    ));
+                }
+                cursor = Some(next);
+            }
+            None => break,
+        }
+    }
+    Ok(rows)
 }
 
 fn parse_search_result(value: &Value) -> Result<SearchResult, CliError> {
