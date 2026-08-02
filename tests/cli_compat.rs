@@ -9,6 +9,8 @@ use flockfly::commands::{run_cli_with, Runtime};
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
+const PUBLIC_COLLECTION_ID: &str = "coll_public";
+
 #[derive(Default)]
 struct Backend {
     approved_email: Option<String>,
@@ -57,17 +59,35 @@ impl FakeApi {
             .ok_or_else(|| CliError::new("Not authenticated.", Some("unauthenticated"), None))
     }
 
-    fn personal_team(email: &str) -> Value {
+    fn personal_router(email: &str) -> Value {
         let username = email.split('@').next().unwrap_or("user");
         json!({
-            "id": format!("team_{username}"),
-            "orgId": format!("org_{username}"),
-            "name": format!("{username}'s personal"),
-            "kind": "personal",
+            "id": format!("router_{username}"),
+            "homeOrgId": format!("org_{username}"),
+            "name": format!("{username}'s router"),
             "createdByUserId": format!("user_{username}"),
             "createdAt": "2026-07-28T00:00:00Z"
         })
     }
+
+    fn public_collection() -> Value {
+        json!({
+            "id": PUBLIC_COLLECTION_ID,
+            "kind": "public",
+            "orgId": Value::Null,
+            "name": "Public",
+            "description": Value::Null,
+            "createdByUserId": "user_system",
+            "createdAt": "2026-07-28T00:00:00Z"
+        })
+    }
+}
+
+fn paged(skills: Vec<Value>) -> Value {
+    json!({
+        "skills": skills,
+        "page": { "limit": 100, "hasMore": false, "nextCursor": Value::Null }
+    })
 }
 
 impl Api for FakeApi {
@@ -103,14 +123,18 @@ impl Api for FakeApi {
                         "name": format!("{username}'s org"),
                         "createdAt": "2026-07-28T00:00:00Z"
                     },
-                    "personalTeam": Self::personal_team(&email)
+                    "personalRouter": Self::personal_router(&email)
                 }))
             }
-            ("GET", "/v1/teams") => {
-                let email = self.email(&state)?;
-                Ok(json!({ "teams": [Self::personal_team(&email)] }))
+            ("GET", "/v1/collections") => {
+                let _email = self.email(&state)?;
+                Ok(json!({ "collections": [Self::public_collection()] }))
             }
-            ("POST", path) if path.starts_with("/v1/orgs/") && path.ends_with("/skills") => {
+            ("GET", "/v1/routers") => {
+                let email = self.email(&state)?;
+                Ok(json!({ "routers": [Self::personal_router(&email)] }))
+            }
+            ("POST", path) if path.starts_with("/v1/collections/") && path.ends_with("/skills") => {
                 let _email = self.email(&state)?;
                 let body = body.unwrap();
                 let files = body["files"].as_array().unwrap();
@@ -146,7 +170,7 @@ impl Api for FakeApi {
                     existing.version += 1;
                     existing.description = description;
                     existing.files = decoded;
-                    if body.get("teamId").and_then(Value::as_str).is_some() {
+                    if body.get("routerId").and_then(Value::as_str).is_some() {
                         existing.attached = true;
                     }
                     return Ok(publish_response(existing));
@@ -159,13 +183,13 @@ impl Api for FakeApi {
                     description,
                     version: 1,
                     files: decoded,
-                    attached: body.get("teamId").and_then(Value::as_str).is_some(),
+                    attached: body.get("routerId").and_then(Value::as_str).is_some(),
                 };
                 let response = publish_response(&skill);
                 state.skills.push(skill);
                 Ok(response)
             }
-            ("POST", path) if path.starts_with("/v1/teams/") && path.contains("/skills/") => {
+            ("POST", path) if path.starts_with("/v1/routers/") && path.contains("/skills/") => {
                 let _email = self.email(&state)?;
                 let skill_id = path.rsplit('/').next().unwrap();
                 let skill = state
@@ -232,11 +256,11 @@ impl Api for FakeApi {
                     .collect();
                 Ok(json!({ "files": files }))
             }
-            ("GET", path) if path.starts_with("/v1/orgs/") && path.ends_with("/skills") => {
+            ("GET", path) if path.starts_with("/v1/collections/") && path.contains("/skills") => {
                 let _email = self.email(&state)?;
-                Ok(json!({ "skills": skill_rows(&state.skills) }))
+                Ok(paged(skill_rows(&state.skills)))
             }
-            ("GET", path) if path.starts_with("/v1/teams/") && path.ends_with("/skills") => {
+            ("GET", path) if path.starts_with("/v1/routers/") && path.contains("/skills") => {
                 let _email = self.email(&state)?;
                 let attached: Vec<_> = state
                     .skills
@@ -244,7 +268,7 @@ impl Api for FakeApi {
                     .filter(|skill| skill.attached)
                     .cloned()
                     .collect();
-                Ok(json!({ "skills": skill_rows(&attached) }))
+                Ok(paged(skill_rows(&attached)))
             }
             _ => panic!("unhandled fake API request: {method} {path} {body:?}"),
         }
@@ -255,7 +279,7 @@ fn publish_response(skill: &Skill) -> Value {
     json!({
         "skill": { "id": skill.id, "name": skill.name },
         "version": { "version": skill.version },
-        "attachedTeamId": if skill.attached { Value::String("team_attached".into()) } else { Value::Null }
+        "attachedRouterId": if skill.attached { Value::String("router_attached".into()) } else { Value::Null }
     })
 }
 
@@ -435,12 +459,12 @@ fn ts_publishes_searches_and_loads_a_skill_end_to_end() {
         .stdout
         .contains("Published pdd as skill_1 (version 1)"));
 
-    let teams = harness.run(&["teams", "list"], None, false);
-    assert_eq!(teams.code, 0);
-    assert!(teams.stdout.contains("[personal]"));
-    let team_id = teams.stdout.split_whitespace().next().unwrap();
+    let routers = harness.run(&["routers", "list"], None, false);
+    assert_eq!(routers.code, 0);
+    assert!(routers.stdout.contains("pub's router"));
+    let router_id = routers.stdout.split_whitespace().next().unwrap();
     let attach = harness.run(
-        &["team", "add", "--skill", "skill_1", "--team", team_id],
+        &["router", "add", "--skill", "skill_1", "--router", router_id],
         None,
         false,
     );
@@ -475,21 +499,21 @@ fn ts_publishes_searches_and_loads_a_skill_end_to_end() {
 }
 
 #[test]
-fn ts_publishes_with_team_and_finds_the_skill_via_search_immediately() {
+fn ts_publishes_with_router_and_finds_the_skill_via_search_immediately() {
     let harness = Harness::new();
-    harness.login("team-pub@example.com");
+    harness.login("router-pub@example.com");
     let publish = harness.run(
         &[
             "publish",
             &harness.fixture("codebase-summary"),
-            "--team",
-            "team-pub's personal",
+            "--router",
+            "router-pub's router",
         ],
         None,
         false,
     );
     assert_eq!(publish.code, 0);
-    assert!(publish.stdout.contains("Attached to team"));
+    assert!(publish.stdout.contains("Attached to router"));
     let search = harness.run(&["search", "analyze codebase documentation"], None, false);
     assert!(search.stdout.contains("codebase-summary"));
 }
@@ -512,21 +536,21 @@ fn ts_asks_before_replacing_an_existing_skill_and_honors_the_answer() {
 }
 
 #[test]
-fn ts_prints_actionable_errors_for_unknown_teams_and_invalid_packages() {
+fn ts_prints_actionable_errors_for_unknown_routers_and_invalid_packages() {
     let harness = Harness::new();
     harness.login("errors@example.com");
-    let bad_team = harness.run(
+    let bad_router = harness.run(
         &[
             "publish",
             &harness.fixture("pdd"),
-            "--team",
-            "nonexistent-team",
+            "--router",
+            "nonexistent-router",
         ],
         None,
         false,
     );
-    assert_eq!(bad_team.code, 1);
-    assert!(bad_team.stderr.contains("flockfly teams list"));
+    assert_eq!(bad_router.code, 1);
+    assert!(bad_router.stderr.contains("flockfly routers list"));
 
     let bad_dir = harness.run(&["publish", "/nonexistent/skill-dir"], None, false);
     assert_eq!(bad_dir.code, 1);
@@ -534,29 +558,29 @@ fn ts_prints_actionable_errors_for_unknown_teams_and_invalid_packages() {
 }
 
 #[test]
-fn ts_lists_org_and_team_skills() {
+fn ts_lists_public_collection_and_router_skills() {
     let harness = Harness::new();
     harness.login("lists@example.com");
     harness.run(
         &[
             "publish",
             &harness.fixture("pdd"),
-            "--team",
-            "lists's personal",
+            "--router",
+            "lists's router",
         ],
         None,
         false,
     );
-    let org_list = harness.run(&["skills", "list", "--org"], None, false);
-    assert_eq!(org_list.code, 0);
-    assert!(org_list.stdout.contains("pdd v1"));
-    let team_list = harness.run(
-        &["skills", "list", "--team", "lists's personal"],
+    let collection_list = harness.run(&["skills", "list"], None, false);
+    assert_eq!(collection_list.code, 0);
+    assert!(collection_list.stdout.contains("pdd v1"));
+    let router_list = harness.run(
+        &["skills", "list", "--router", "lists's router"],
         None,
         false,
     );
-    assert_eq!(team_list.code, 0);
-    assert!(team_list.stdout.contains("pdd v1"));
+    assert_eq!(router_list.code, 0);
+    assert!(router_list.stdout.contains("pdd v1"));
 }
 
 #[test]
@@ -575,8 +599,8 @@ fn search_load_selects_the_best_rank_and_prints_raw_loaded_content() {
         &[
             "publish",
             &harness.fixture("pdd"),
-            "--team",
-            "search-load's personal",
+            "--router",
+            "search-load's router",
         ],
         None,
         false,
@@ -585,8 +609,8 @@ fn search_load_selects_the_best_rank_and_prints_raw_loaded_content() {
         &[
             "publish",
             &harness.fixture("codebase-summary"),
-            "--team",
-            "search-load's personal",
+            "--router",
+            "search-load's router",
         ],
         None,
         false,
@@ -624,8 +648,8 @@ fn search_without_load_keeps_ranked_output_and_does_not_load() {
         &[
             "publish",
             &harness.fixture("pdd"),
-            "--team",
-            "ordinary-search's personal",
+            "--router",
+            "ordinary-search's router",
         ],
         None,
         false,
@@ -672,8 +696,8 @@ fn search_load_propagates_load_api_failures() {
         &[
             "publish",
             &harness.fixture("pdd"),
-            "--team",
-            "load-failure's personal",
+            "--router",
+            "load-failure's router",
         ],
         None,
         false,

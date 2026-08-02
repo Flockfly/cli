@@ -120,11 +120,15 @@ impl Api for HttpApi {
 fn actionable_message(code: &str, message: &str) -> String {
     match code {
         "unauthenticated" => "You are not logged in. Run `flockfly login` first.".to_owned(),
-        "team_not_found" => {
-            format!("{message} Run `flockfly teams list` to see your teams.")
+        "router_not_found" => {
+            format!("{message} Run `flockfly routers list` to see your routers.")
         }
-        "not_team_member" => {
-            format!("{message} Skills can only be attached to teams you belong to.")
+        "router_access_denied" => {
+            format!("{message} Skills can only be attached to routers you belong to.")
+        }
+        "collection_not_found" => message.to_owned(),
+        "collection_access_denied" => {
+            format!("{message} You may not have publish access to this collection yet.")
         }
         _ => message.to_owned(),
     }
