@@ -12,7 +12,7 @@ The four original non-E2E files contain 21 `it(...)` cases. The Rust suite conta
 | format: handles empty results | `ts_handles_empty_results` |
 | format: prints a single file raw | `ts_prints_a_single_file_raw` |
 | format: adds boundaries for multiple files | `ts_adds_boundaries_for_multiple_files` |
-| format: teaches search, load, and progressive disclosure | `ts_teaches_search_load_and_progressive_disclosure` |
+| format: loads the Flockfly discovery skill with its activation description | `ts_loads_the_flockfly_discovery_skill_with_its_activation_description` |
 | package: packages a fixture skill with sorted relative paths | `ts_packages_a_fixture_skill_with_sorted_relative_paths` |
 | package: rejects a missing path and non-directories | `ts_rejects_a_missing_path_and_non_directories` |
 | package: rejects a directory without SKILL.md | `ts_rejects_a_directory_without_skill_md` |
@@ -65,3 +65,16 @@ Rust CLI's command surface, endpoints, and test suite were updated to match:
 `config.rs`, `package.rs`, and their test files (`config_compat.rs`, `package_compat.rs`) are untouched — neither concept touches collections, routers, or orgs.
 
 Current evidence is recorded in `.code-assist/flockfly-cli-rust-distribution/progress.md`.
+
+## `init` loads a discovery skill instead of teaching search/load (2026-08-03)
+
+The source TypeScript CLI's `init` command no longer prints instructions to
+run `flockfly search`/`flockfly load` manually. Instead it tells the agent to
+load one fixed, published meta-skill (`skill_pxJxZr7CMBMk`, the "Flockfly
+discovery" skill) and includes that skill's activation description inline so
+the agent can decide when to load it without an extra round trip. The Rust
+CLI's `init` output and command description were updated to match:
+
+- `format.rs`'s `INIT_SNIPPET` now says `flockfly load skill_pxJxZr7CMBMk` plus the discovery skill's description, instead of teaching `flockfly search "<task>"` / `flockfly load <skillId>` / `flockfly load <skillId> <path...>`
+- `commands.rs`'s `init` action prints `INIT_SNIPPET` directly (no more "Add the following snippet to your CLAUDE.md or AGENTS.md:" wrapper), and its clap `about` text changed from "Print the snippet to add to CLAUDE.md or AGENTS.md" to "Print the Flockfly discovery instructions"
+- `search` and `load` remain unchanged as subcommands; only the `init` snippet's guidance text changed

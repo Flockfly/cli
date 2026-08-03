@@ -73,8 +73,12 @@ fn ts_adds_boundaries_for_multiple_files() {
 }
 
 #[test]
-fn ts_teaches_search_load_and_progressive_disclosure() {
-    assert!(INIT_SNIPPET.contains("flockfly search \"<task>\""));
-    assert!(INIT_SNIPPET.contains("flockfly load <skillId>"));
-    assert!(INIT_SNIPPET.contains("flockfly load <skillId> <path...>"));
+fn ts_loads_the_flockfly_discovery_skill_with_its_activation_description() {
+    assert!(INIT_SNIPPET.contains("flockfly load skill_pxJxZr7CMBMk"));
+    assert!(INIT_SNIPPET.contains(
+        "Discover and apply reusable Flockfly skills for non-trivial work that may benefit from a playbook, SOP, template, policy, domain guide, or workflow."
+    ));
+    assert!(INIT_SNIPPET.contains(
+        "Use when the task is substantial, procedural, or knowledge-heavy and a routed skill may improve the result; skip trivial edits, simple factual answers, named test commands, and tasks already governed by an explicitly selected local skill."
+    ));
 }

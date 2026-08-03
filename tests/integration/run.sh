@@ -18,7 +18,7 @@ echo "Offline commands:"
 flockfly --version | grep -q "flockfly" && pass "--version" || fail "--version"
 flockfly --help | grep -q "publish" && pass "--help lists publish" || fail "--help lists publish"
 flockfly search --help | grep -q -- "--load" && pass "search --help lists --load" || fail "search --help lists --load"
-flockfly init | grep -q 'flockfly search "<task>"' && pass "init prints snippet" || fail "init prints snippet"
+flockfly init | grep -q 'flockfly load skill_pxJxZr7CMBMk' && pass "init prints snippet" || fail "init prints snippet"
 
 ! flockfly bogus-command >/dev/null 2>&1 && pass "unknown subcommand exits nonzero" || fail "unknown subcommand exits nonzero"
 

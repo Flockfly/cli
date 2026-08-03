@@ -7,4 +7,4 @@ test -x "$BINARY"
 "$BINARY" --version | grep -q "flockfly"
 "$BINARY" --help | grep -q "publish"
 "$BINARY" search --help | grep -q -- "--load"
-"$BINARY" init | grep -q 'flockfly search "<task>"'
+"$BINARY" init | grep -q 'flockfly load skill_pxJxZr7CMBMk'

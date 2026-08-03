@@ -35,4 +35,4 @@ if [ "$actual_version" != "$latest_version" ]; then
   exit 1
 fi
 flockfly --help >/dev/null
-flockfly init | grep -q 'flockfly search "<task>"'
+flockfly init | grep -q 'flockfly load skill_pxJxZr7CMBMk'

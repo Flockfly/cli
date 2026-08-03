@@ -2,17 +2,14 @@ use serde::{Deserialize, Serialize};
 
 pub const INIT_SNIPPET: &str = r#"## Flockfly Skills
 
-Before starting substantial knowledge work, search your routed skills:
+Before starting substantial knowledge work, load the Flockfly discovery skill:
 
-`flockfly search "<task>"`
+`flockfly load skill_pxJxZr7CMBMk`
 
-If a relevant skill appears, load it:
+The skill description is:
 
-`flockfly load <skillId>`
+Discover and apply reusable Flockfly skills for non-trivial work that may benefit from a playbook, SOP, template, policy, domain guide, or workflow. Use when the task is substantial, procedural, or knowledge-heavy and a routed skill may improve the result; skip trivial edits, simple factual answers, named test commands, and tasks already governed by an explicitly selected local skill.
 
-Follow the loaded skill's progressive-disclosure instructions. Load referenced files only when the skill asks for them:
-
-`flockfly load <skillId> <path...>`
 "#;
 
 #[derive(Clone, Debug, PartialEq)]
