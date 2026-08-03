@@ -38,7 +38,7 @@ enum Command {
     Login,
     /// Show the authenticated user
     Whoami,
-    /// Print the snippet to add to CLAUDE.md or AGENTS.md
+    /// Print the Flockfly discovery instructions
     Init,
     /// Publish a skill package directory to the public collection
     Publish {
@@ -163,9 +163,7 @@ fn execute(
             Ok(())
         }
         Command::Init => {
-            runtime.out(&format!(
-                "Add the following snippet to your CLAUDE.md or AGENTS.md:\n\n{INIT_SNIPPET}"
-            ));
+            runtime.out(INIT_SNIPPET);
             Ok(())
         }
         Command::Publish {

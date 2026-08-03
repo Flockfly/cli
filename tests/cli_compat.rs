@@ -446,7 +446,7 @@ fn ts_prints_the_init_snippet_without_touching_files() {
     let result = Harness::new().run(&["init"], None, false);
     assert_eq!(result.code, 0);
     assert!(result.stdout.contains("## Flockfly Skills"));
-    assert!(result.stdout.contains("flockfly search \"<task>\""));
+    assert!(result.stdout.contains("flockfly load skill_pxJxZr7CMBMk"));
 }
 
 #[test]
