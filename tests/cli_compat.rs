@@ -307,6 +307,7 @@ struct TestRuntime {
     approve_email: Option<String>,
     confirm_answer: bool,
     question: String,
+    stdin: String,
 }
 
 impl Runtime for TestRuntime {
@@ -334,6 +335,10 @@ impl Runtime for TestRuntime {
     }
 
     fn sleep(&mut self, _duration: Duration) {}
+
+    fn read_stdin(&mut self) -> String {
+        self.stdin.clone()
+    }
 }
 
 struct Harness {
@@ -375,6 +380,16 @@ impl Harness {
         approve_email: Option<&str>,
         confirm_answer: bool,
     ) -> ResultCapture {
+        self.run_with_stdin(args, approve_email, confirm_answer, "")
+    }
+
+    fn run_with_stdin(
+        &self,
+        args: &[&str],
+        approve_email: Option<&str>,
+        confirm_answer: bool,
+        stdin: &str,
+    ) -> ResultCapture {
         let mut runtime = TestRuntime {
             env: self.env.clone(),
             stdout: vec![],
@@ -383,6 +398,7 @@ impl Harness {
             approve_email: approve_email.map(str::to_owned),
             confirm_answer,
             question: String::new(),
+            stdin: stdin.to_owned(),
         };
         let code = run_cli_with(args, &mut runtime, &self.factory);
         ResultCapture {

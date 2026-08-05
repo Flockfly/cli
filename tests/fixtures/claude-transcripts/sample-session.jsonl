@@ -1,0 +1,3 @@
+{"type":"user","sessionId":"claude-session-1","uuid":"entry-user-1","message":{"role":"user","content":[{"type":"text","text":"Please inspect Murmur."}]}}
+{"type":"assistant","sessionId":"claude-session-1","uuid":"entry-tool-1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"murmur/README.md"}}]}}
+{"type":"user","sessionId":"claude-session-1","uuid":"entry-result-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Murmur stores sessions."}]}}
