@@ -46,6 +46,13 @@ impl Runtime for StdRuntime {
     fn sleep(&mut self, duration: Duration) {
         std::thread::sleep(duration);
     }
+
+    fn read_stdin(&mut self) -> String {
+        use std::io::Read;
+        let mut buffer = String::new();
+        let _ = io::stdin().read_to_string(&mut buffer);
+        buffer
+    }
 }
 
 fn main() {

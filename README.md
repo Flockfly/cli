@@ -44,11 +44,28 @@ flockfly router add --skill skill_abc123 --router engineering
 flockfly routers list
 flockfly skills list
 flockfly skills list --router engineering
+flockfly init --collection coll_abc123
+flockfly hooks remove
 ```
 
 A published skill directory must contain `SKILL.md` with `name` and `description` YAML frontmatter. Symlinks that leave the package directory are rejected. `publish` always targets the public skill collection; `--router` additionally attaches the published skill to a router so agents routed to it can find it immediately.
 
 `search --load` loads and prints the highest-ranked match immediately. Its output is the same raw `SKILL.md` content produced by `flockfly load <skill-id>`. If nothing matches, it prints `No matching skills found.` without issuing a load request.
+
+### Automatic Claude Code session sync
+
+`flockfly init --collection <id>` configures automatic session capture for
+Claude Code. You must already hold session-publish access on the given
+collection (ask its owner to grant it if you don't). Once configured, it
+installs a global hook in `~/.claude/settings.json` — every Claude Code
+session on the machine, in any repo, gets pushed into that collection from
+then on: incrementally after each turn (`Stop`/`SubagentStop`), and a full
+catch-up reconcile when the session ends (`SessionEnd`), so nothing is lost
+even if an incremental push is missed. `flockfly session sync --hook` is
+the hook's own entrypoint (Claude Code invokes it; you shouldn't need to
+run it directly). `flockfly hooks remove` uninstalls the hook without
+touching the configured collection, so re-running `init --collection`
+later doesn't require picking it again.
 
 ## Configuration
 
@@ -58,7 +75,7 @@ A published skill directory must contain `SKILL.md` with `name` and `description
 | `FLOCKFLY_CONFIG_DIR` | Override the credential directory; defaults to `~/.flockfly`. |
 | `FLOCKFLY_TOKEN` | Inject a token for CI or agents without a credential file. |
 
-Browser login stores credentials in `credentials.json` with mode `0600` on Unix. Tokens are never printed by normal commands.
+Browser login stores credentials in `credentials.json` with mode `0600` on Unix. Tokens are never printed by normal commands. The collection configured by `flockfly init --collection <id>` is stored alongside it, in `sync-config.json`.
 
 ## Upgrade and uninstall
 
