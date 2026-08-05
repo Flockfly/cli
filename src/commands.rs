@@ -6,11 +6,15 @@ use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 
 use crate::api::{Api, ApiFactory, CliError};
-use crate::config::{api_url, load_credentials, save_credentials, Credentials};
+use crate::config::{
+    api_url, load_credentials, save_credentials, save_sync_config, Credentials, SyncConfig,
+};
 use crate::format::{
     format_loaded_files, format_search_results, LoadedFile, SearchResult, INIT_SNIPPET,
 };
+use crate::hooks::{install_global_hook, remove_global_hook};
 use crate::package::package_skill_directory;
+use crate::session::{session_sync_command, SessionSyncOptions};
 
 pub trait Runtime {
     fn env(&self) -> &HashMap<String, String>;
@@ -19,6 +23,7 @@ pub trait Runtime {
     fn confirm(&mut self, question: &str) -> bool;
     fn open_browser(&mut self, url: &str);
     fn sleep(&mut self, duration: Duration);
+    fn read_stdin(&mut self) -> String;
 }
 
 #[derive(Parser)]
@@ -38,8 +43,12 @@ enum Command {
     Login,
     /// Show the authenticated user
     Whoami,
-    /// Print the Flockfly discovery instructions
-    Init,
+    /// Print the Flockfly discovery instructions, or configure Claude Code session sync
+    Init {
+        /// Collection id to sync Claude Code sessions into
+        #[arg(long)]
+        collection: Option<String>,
+    },
     /// Publish a skill package directory to the public collection
     Publish {
         /// Directory containing SKILL.md plus referenced files
@@ -80,6 +89,38 @@ enum Command {
     Skills {
         #[command(subcommand)]
         command: SkillsCommand,
+    },
+    /// Manage the global Claude Code session-sync hook
+    Hooks {
+        #[command(subcommand)]
+        command: HooksCommand,
+    },
+    /// Claude Code session transcript sync
+    Session {
+        #[command(subcommand)]
+        command: SessionCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum HooksCommand {
+    /// Remove Flockfly's Claude Code hook from ~/.claude/settings.json
+    Remove,
+}
+
+#[derive(Subcommand)]
+enum SessionCommand {
+    /// Push or reconcile a Claude Code transcript into the configured collection (Claude Code hook entrypoint)
+    Sync {
+        /// Read the hook event payload from stdin
+        #[arg(long)]
+        hook: bool,
+        /// Full catch-up reconcile instead of an incremental push
+        #[arg(long)]
+        reconcile: bool,
+        /// Override the configured collection id
+        #[arg(long)]
+        collection: Option<String>,
     },
 }
 
@@ -162,10 +203,13 @@ fn execute(
             ));
             Ok(())
         }
-        Command::Init => {
-            runtime.out(INIT_SNIPPET);
-            Ok(())
-        }
+        Command::Init { collection } => match collection {
+            None => {
+                runtime.out(INIT_SNIPPET);
+                Ok(())
+            }
+            Some(collection_id) => init_with_collection(runtime, factory, &collection_id),
+        },
         Command::Publish {
             skill_directory,
             router,
@@ -262,7 +306,95 @@ fn execute(
             runtime.out(&render_skill_rows(&rows)?);
             Ok(())
         }
+        Command::Hooks {
+            command: HooksCommand::Remove,
+        } => {
+            let (path, removed) = remove_global_hook(runtime.env())
+                .map_err(|error| CliError::message(error.to_string()))?;
+            let path = path.display();
+            if removed {
+                runtime.out(&format!("Removed Flockfly hooks from {path}."));
+            } else {
+                runtime.out(&format!("No Flockfly hooks were installed in {path}."));
+            }
+            Ok(())
+        }
+        Command::Session {
+            command:
+                SessionCommand::Sync {
+                    hook,
+                    reconcile,
+                    collection,
+                },
+        } => {
+            session_sync_command(
+                runtime,
+                factory,
+                SessionSyncOptions {
+                    hook,
+                    reconcile,
+                    collection,
+                },
+            );
+            Ok(())
+        }
     }
+}
+
+// Bare `init` prints the discovery snippet (today's behavior, unchanged).
+// `init --collection <id>` is a different setup step: it configures and
+// installs the global Claude Code session-sync hook instead — the caller
+// must already hold `publish` session access on that collection.
+fn init_with_collection(
+    runtime: &mut dyn Runtime,
+    factory: &dyn ApiFactory,
+    collection_id: &str,
+) -> Result<(), CliError> {
+    let client = authed_client(runtime.env(), factory)?;
+    let response = client.request(
+        "GET",
+        &format!("/v1/collections/{}", urlencoding::encode(collection_id)),
+        None,
+    )?;
+    let collection = value_at(&response, &["collection"])?;
+    let resolved_id = string_at(collection, &["id"])?;
+    let name = string_at(collection, &["name"])?;
+
+    let permissions_response = client.request(
+        "GET",
+        &format!(
+            "/v1/collections/{}/sessions/permissions",
+            urlencoding::encode(&resolved_id)
+        ),
+        None,
+    )?;
+    let can_publish = value_at(&permissions_response, &["permissions", "canPublish"])?
+        .as_bool()
+        .unwrap_or(false);
+    if !can_publish {
+        return Err(CliError::message(format!(
+            "You do not have publish access to session storage in \"{name}\" ({resolved_id}). Ask a collection owner to grant you session publish access.",
+        )));
+    }
+
+    save_sync_config(
+        &SyncConfig {
+            collection_id: resolved_id.clone(),
+        },
+        runtime.env(),
+    )
+    .map_err(|error| CliError::message(error.to_string()))?;
+    let (path, events) =
+        install_global_hook(runtime.env()).map_err(|error| CliError::message(error.to_string()))?;
+    runtime.out(&format!(
+        "Configured Claude Code session sync into \"{name}\" ({resolved_id})."
+    ));
+    runtime.out(&format!(
+        "Installed hooks in {}: {}.",
+        path.display(),
+        events.join(", ")
+    ));
+    Ok(())
 }
 
 fn login(runtime: &mut dyn Runtime, factory: &dyn ApiFactory) -> Result<(), CliError> {

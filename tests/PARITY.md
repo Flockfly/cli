@@ -78,3 +78,82 @@ CLI's `init` output and command description were updated to match:
 - `format.rs`'s `INIT_SNIPPET` now says `flockfly load skill_pxJxZr7CMBMk` plus the discovery skill's description, instead of teaching `flockfly search "<task>"` / `flockfly load <skillId>` / `flockfly load <skillId> <path...>`
 - `commands.rs`'s `init` action prints `INIT_SNIPPET` directly (no more "Add the following snippet to your CLAUDE.md or AGENTS.md:" wrapper), and its clap `about` text changed from "Print the snippet to add to CLAUDE.md or AGENTS.md" to "Print the Flockfly discovery instructions"
 - `search` and `load` remain unchanged as subcommands; only the `init` snippet's guidance text changed
+
+## Claude Code session sync (2026-08-05)
+
+New feature, not a ported TS behavior — this is the first case where the
+source TypeScript CLI grew a capability that didn't exist yet anywhere, so
+per `MIGRATION.md`'s "TS is the reference" workflow it was built first in
+`context-router/cli` (`src/{hooks,hookSync,session}.ts`, extended
+`config.ts`/`commands.ts`, and new `test/{hooks,hookSync}.test.ts` plus
+extensions to `test/cli.test.ts`) and then ported here 1:1. It does not
+extend the original 21-case table above; it's additive coverage the same
+way `search --load` was.
+
+`flockfly init --collection <id>` installs a global Claude Code hook
+(`~/.claude/settings.json`'s `Stop`/`SubagentStop`/`SessionEnd` events) that
+runs `flockfly session sync --hook` on every Claude Code session, anywhere
+on the machine. The hook reads new transcript lines since the last recorded
+byte offset, pushes them (harness-native, unnormalized) to the Context
+API's `POST /v1/collections/:id/sessions/logs/native`, and on `SessionEnd`
+does a full-file `POST .../sessions/reconcile/native` catch-up sweep
+instead (dedup-by-id, guards against any incremental push that got missed).
+Normalization of raw Claude JSONL into Murmur's unified event shape happens
+server-side in Murmur (`normalize_claude_entry`), not in either CLI — both
+CLIs stay dumb, uploading transcript bytes unmodified.
+
+New Rust modules, each a direct port of its TypeScript source:
+
+- `src/hooks.rs` (from `hooks.ts`): marker-based idempotent install/remove
+  of the three managed hook entries in `~/.claude/settings.json`, reading
+  the home directory from `env["HOME"]` (tests inject a temp dir there,
+  same as `config_compat.rs` already does for `FLOCKFLY_CONFIG_DIR`) rather
+  than always calling `dirs::home_dir()` directly, so it's testable the
+  same way.
+- `src/hook_sync.rs` (from `hookSync.ts`, itself a port of
+  `murmur/scripts/claude-code-hook-sync.py`): `derive_claude_session_key`
+  (path → collection-session key + subagent subpath) and
+  `read_complete_new_lines` (byte-offset incremental JSONL reader — only
+  complete trailing lines, resets on truncation, skips malformed lines),
+  plus `SyncState` persistence under `config_dir()/session-sync-state.json`.
+- `src/session.rs` (from `session.ts`): `session_sync_command` — the
+  `--hook` entrypoint. Best-effort by construction (`Result` errors are
+  caught by the caller and written to `runtime.err()`, never propagated),
+  so a sync failure can never block Claude Code.
+- `src/config.rs` gained `SyncConfig`/`load_sync_config`/`save_sync_config`
+  (`~/.flockfly/sync-config.json`, mirroring `credentials.json`'s 0600
+  write pattern) — kept separate from credentials so `logout` doesn't
+  discard the configured collection.
+- `src/commands.rs`: `Init` gained an optional `--collection <id>` (bare
+  `init` is unchanged — still prints `INIT_SNIPPET`); new `Hooks { Remove }`
+  and `Session { Sync { hook, reconcile, collection } }` subcommands; the
+  `Runtime` trait gained `read_stdin(&mut self) -> String` (implemented via
+  `io::stdin().read_to_string` in `main.rs`'s `StdRuntime`, and via an
+  injectable `stdin: String` field on every fake `Runtime` used in tests).
+
+New Rust test files, each with its own coverage (no 1:1 name mapping to
+TypeScript test names, since this is additive, not ported):
+
+- `tests/hooks_compat.rs` — install/idempotent-reinstall/preserves-
+  unrelated-hooks/remove, against a temp `HOME`.
+- `tests/hook_sync_compat.rs` — key derivation table cases (main transcript,
+  subagent subpath, no-`projects/`-segment fallback) and
+  `read_complete_new_lines` fixture-file cases (partial trailing line,
+  resumed offset, truncation reset, malformed line skipped), plus one case
+  reading the shared realistic fixture at
+  `tests/fixtures/claude-transcripts/sample-session.jsonl` — byte-identical
+  to `context-router/cli/test/fixtures/claude-transcripts/sample-session.jsonl`,
+  so both suites exercise the same input.
+- `tests/session_sync_compat.rs` — its own minimal fake `Api`/`ApiFactory`
+  backend (not `cli_compat.rs`'s skills/routers-oriented one, which doesn't
+  model collection-session routes) covering: `init --collection` with/
+  without session-publish access, `hooks remove` idempotency, an end-to-end
+  `session sync --hook` push against the shared fixture transcript,
+  best-effort exit-0 behavior (no collection configured; missing transcript
+  file), offset persistence across two incremental hook fires, and
+  `--reconcile` backfilling entries a prior incremental push missed.
+
+`tests/PARITY.md` is the living record for changes like this one;
+`.code-assist/flockfly-cli-rust-distribution/plan.md` is a frozen snapshot
+of the initial TS→Rust transfer checklist and was not updated for the two
+redesigns above either — this entry follows that same precedent.
