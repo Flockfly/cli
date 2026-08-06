@@ -1,7 +1,7 @@
 // Installs/removes the global Claude Code hook that drives automatic
 // session sync (see session.rs, hook_sync.rs). Global, not per-repo — one
 // install in ~/.claude/settings.json covers every Claude Code session on
-// the machine, matching `flockfly init --collection <id>`'s scope.
+// the machine, matching `flockfly init --sessions`'s scope.
 //
 // Ported from the TypeScript reference implementation
 // (context-router/cli/src/hooks.ts) — same marker-based idempotency

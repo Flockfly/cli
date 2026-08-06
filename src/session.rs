@@ -1,8 +1,10 @@
 // `flockfly session sync` — the Claude Code hook entrypoint. Reads a hook
-// event's JSON off stdin, derives the collection-session key for its
-// transcript(s), and pushes (or reconciles) new content into the
-// configured collection. Ported from the TypeScript reference
-// implementation (context-router/cli/src/session.ts).
+// event's JSON off stdin, derives the session key for its transcript(s),
+// and pushes (or reconciles) new content — unconditionally, as the
+// authenticated CLI user, with no collection to configure. Visibility into
+// collections is computed server-side at publish time (see
+// computePublishDestinationCollectionIds in services/sessions.ts). Ported
+// from the TypeScript reference implementation (context-router/cli/src/session.ts).
 use std::path::Path;
 
 use serde::Deserialize;
@@ -19,7 +21,6 @@ use crate::hook_sync::{
 pub struct SessionSyncOptions {
     pub hook: bool,
     pub reconcile: bool,
-    pub collection: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -54,13 +55,6 @@ fn run_session_sync(
         return Ok(());
     }
     let env = runtime.env().clone();
-    let collection_id = options
-        .collection
-        .or_else(|| crate::config::load_sync_config(&env).map(|config| config.collection_id));
-    let Some(collection_id) = collection_id else {
-        runtime.err("flockfly session sync: no collection configured. Run `flockfly init --collection <id>` first.");
-        return Ok(());
-    };
 
     let raw = runtime.read_stdin();
     let hook_input: HookInput = match serde_json::from_str(&raw) {
@@ -100,14 +94,7 @@ fn run_session_sync(
         if let Some(session_id) = &hook_input.session_id {
             create_body["externalSessionId"] = json!(session_id);
         }
-        if let Err(error) = client.request(
-            "POST",
-            &format!(
-                "/v1/collections/{}/sessions",
-                urlencoding::encode(&collection_id)
-            ),
-            Some(create_body),
-        ) {
+        if let Err(error) = client.request("POST", "/v1/sessions", Some(create_body)) {
             runtime.err(&format!(
                 "flockfly session sync: failed for {transcript_path}: {error}"
             ));
@@ -132,14 +119,8 @@ fn run_session_sync(
             if let Some(subpath) = &key_info.subpath {
                 body["subpath"] = json!(subpath);
             }
-            if let Err(error) = client.request(
-                "POST",
-                &format!(
-                    "/v1/collections/{}/sessions/reconcile/native",
-                    urlencoding::encode(&collection_id)
-                ),
-                Some(body),
-            ) {
+            if let Err(error) = client.request("POST", "/v1/sessions/reconcile/native", Some(body))
+            {
                 runtime.err(&format!(
                     "flockfly session sync: failed for {transcript_path}: {error}"
                 ));
@@ -163,14 +144,7 @@ fn run_session_sync(
                 if let Some(subpath) = &key_info.subpath {
                     body["subpath"] = json!(subpath);
                 }
-                if let Err(error) = client.request(
-                    "POST",
-                    &format!(
-                        "/v1/collections/{}/sessions/logs/native",
-                        urlencoding::encode(&collection_id)
-                    ),
-                    Some(body),
-                ) {
+                if let Err(error) = client.request("POST", "/v1/sessions/logs/native", Some(body)) {
                     runtime.err(&format!(
                         "flockfly session sync: failed for {transcript_path}: {error}"
                     ));

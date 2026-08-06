@@ -6,9 +6,7 @@ use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 
 use crate::api::{Api, ApiFactory, CliError};
-use crate::config::{
-    api_url, load_credentials, save_credentials, save_sync_config, Credentials, SyncConfig,
-};
+use crate::config::{api_url, load_credentials, save_credentials, Credentials};
 use crate::format::{
     format_loaded_files, format_search_results, LoadedFile, SearchResult, INIT_SNIPPET,
 };
@@ -45,9 +43,9 @@ enum Command {
     Whoami,
     /// Print the Flockfly discovery instructions, or configure Claude Code session sync
     Init {
-        /// Collection id to sync Claude Code sessions into
+        /// Install the global Claude Code session-sync hook
         #[arg(long)]
-        collection: Option<String>,
+        sessions: bool,
     },
     /// Publish a skill package directory to the public collection
     Publish {
@@ -110,7 +108,7 @@ enum HooksCommand {
 
 #[derive(Subcommand)]
 enum SessionCommand {
-    /// Push or reconcile a Claude Code transcript into the configured collection (Claude Code hook entrypoint)
+    /// Push or reconcile a Claude Code transcript (Claude Code hook entrypoint)
     Sync {
         /// Read the hook event payload from stdin
         #[arg(long)]
@@ -118,9 +116,6 @@ enum SessionCommand {
         /// Full catch-up reconcile instead of an incremental push
         #[arg(long)]
         reconcile: bool,
-        /// Override the configured collection id
-        #[arg(long)]
-        collection: Option<String>,
     },
 }
 
@@ -203,13 +198,13 @@ fn execute(
             ));
             Ok(())
         }
-        Command::Init { collection } => match collection {
-            None => {
+        Command::Init { sessions } => {
+            if !sessions {
                 runtime.out(INIT_SNIPPET);
-                Ok(())
+                return Ok(());
             }
-            Some(collection_id) => init_with_collection(runtime, factory, &collection_id),
-        },
+            init_sessions(runtime)
+        }
         Command::Publish {
             skill_directory,
             router,
@@ -320,75 +315,25 @@ fn execute(
             Ok(())
         }
         Command::Session {
-            command:
-                SessionCommand::Sync {
-                    hook,
-                    reconcile,
-                    collection,
-                },
+            command: SessionCommand::Sync { hook, reconcile },
         } => {
-            session_sync_command(
-                runtime,
-                factory,
-                SessionSyncOptions {
-                    hook,
-                    reconcile,
-                    collection,
-                },
-            );
+            session_sync_command(runtime, factory, SessionSyncOptions { hook, reconcile });
             Ok(())
         }
     }
 }
 
 // Bare `init` prints the discovery snippet (today's behavior, unchanged).
-// `init --collection <id>` is a different setup step: it configures and
-// installs the global Claude Code session-sync hook instead — the caller
-// must already hold `publish` session access on that collection.
-fn init_with_collection(
-    runtime: &mut dyn Runtime,
-    factory: &dyn ApiFactory,
-    collection_id: &str,
-) -> Result<(), CliError> {
-    let client = authed_client(runtime.env(), factory)?;
-    let response = client.request(
-        "GET",
-        &format!("/v1/collections/{}", urlencoding::encode(collection_id)),
-        None,
-    )?;
-    let collection = value_at(&response, &["collection"])?;
-    let resolved_id = string_at(collection, &["id"])?;
-    let name = string_at(collection, &["name"])?;
-
-    let permissions_response = client.request(
-        "GET",
-        &format!(
-            "/v1/collections/{}/sessions/permissions",
-            urlencoding::encode(&resolved_id)
-        ),
-        None,
-    )?;
-    let can_publish = value_at(&permissions_response, &["permissions", "canPublish"])?
-        .as_bool()
-        .unwrap_or(false);
-    if !can_publish {
-        return Err(CliError::message(format!(
-            "You do not have publish access to session storage in \"{name}\" ({resolved_id}). Ask a collection owner to grant you session publish access.",
-        )));
-    }
-
-    save_sync_config(
-        &SyncConfig {
-            collection_id: resolved_id.clone(),
-        },
-        runtime.env(),
-    )
-    .map_err(|error| CliError::message(error.to_string()))?;
+// `init --sessions` is a different setup step: it installs the global
+// Claude Code session-sync hook instead. Publishing a session is
+// unconditional for any authenticated user — there's no collection to pick
+// and nothing to check here; visibility into collections is computed
+// server-side at publish time (see computePublishDestinationCollectionIds
+// in services/sessions.ts).
+fn init_sessions(runtime: &mut dyn Runtime) -> Result<(), CliError> {
     let (path, events) =
         install_global_hook(runtime.env()).map_err(|error| CliError::message(error.to_string()))?;
-    runtime.out(&format!(
-        "Configured Claude Code session sync into \"{name}\" ({resolved_id})."
-    ));
+    runtime.out("Configured Claude Code session sync.");
     runtime.out(&format!(
         "Installed hooks in {}: {}.",
         path.display(),
