@@ -199,6 +199,6 @@ boolean flag that just installs the hook.
 - `src/hooks.rs`: one stray doc-comment reference to `init --collection
   <id>` updated to `init --sessions`.
 
-`Cargo.toml` bumped `0.4.0` → `1.0.0` per `RELEASE.md`'s own semver table
-("Breaking CLI change, API contract change" — a flag removed, and every
-client on the old contract 404s against the new backend).
+`Cargo.toml` bumped `0.4.0` → `0.5.0` (minor — explicit product-owner call,
+overriding `RELEASE.md`'s literal semver-table example for "Breaking CLI
+change, API contract change," which would have implied `1.0.0`).
