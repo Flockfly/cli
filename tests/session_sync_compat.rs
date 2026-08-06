@@ -1,10 +1,10 @@
 // Rust parity coverage for the Claude Code session-sync feature ported from
 // context-router/cli/src/{hooks,hookSync,session}.ts and its
 // cli.test.ts extension (see tests/PARITY.md's "Claude Code session sync"
-// section). This is new coverage, not a 1:1 ported TS test, so it uses its
-// own minimal fake backend rather than extending cli_compat.rs's
-// skills/routers-oriented one — only the handful of routes this feature
-// touches are implemented.
+// and "Session storage permissions redesign" sections). This is new
+// coverage, not a 1:1 ported TS test, so it uses its own minimal fake
+// backend rather than extending cli_compat.rs's skills/routers-oriented
+// one — only the handful of routes this feature touches are implemented.
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::sync::{Arc, Mutex};
@@ -19,9 +19,11 @@ use tempfile::TempDir;
 struct Backend {
     approved_email: Option<String>,
     token_email: HashMap<String, String>,
-    // collectionId -> (name, emails allowed to publish sessions)
-    collections: HashMap<String, (String, HashSet<String>)>,
-    // (collectionId, key) -> normalized entries
+    // email -> personal collection id, auto-provisioned at login (mirrors
+    // ensurePersonalCollection in services/collections.ts — every user gets
+    // one, with no collection to configure).
+    personal_collections: HashMap<String, String>,
+    // (ownerEmail, key) -> normalized entries
     sessions: HashMap<(String, String), Vec<Value>>,
 }
 
@@ -50,6 +52,10 @@ impl FakeApi {
             .cloned()
             .ok_or_else(|| CliError::new("Not authenticated.", Some("unauthenticated"), None))
     }
+}
+
+fn personal_collection_id(email: &str) -> String {
+    format!("coll_personal_{}", email.replace(['@', '.'], "_"))
 }
 
 // Simplified stand-in for Murmur's normalize_claude_entry — enough to
@@ -83,7 +89,13 @@ impl Api for FakeApi {
             ("POST", "/v1/auth/cli/poll") => {
                 if let Some(email) = state.approved_email.clone() {
                     let token = format!("ffly_{}", email.replace(['@', '.'], "_"));
-                    state.token_email.insert(token.clone(), email);
+                    state.token_email.insert(token.clone(), email.clone());
+                    // Mirrors ensureUserByEmail calling ensurePersonalCollection
+                    // on every login — idempotent, always exists after this.
+                    state
+                        .personal_collections
+                        .entry(email.clone())
+                        .or_insert_with(|| personal_collection_id(&email));
                     Ok(json!({ "status": "approved", "token": token }))
                 } else {
                     Ok(json!({ "status": "pending" }))
@@ -97,24 +109,20 @@ impl Api for FakeApi {
                     "org": { "id": format!("org_{username}"), "name": format!("{username}'s org"), "createdAt": "2026-01-01T00:00:00Z" }
                 }))
             }
-            ("GET", path)
-                if path.starts_with("/v1/collections/")
-                    && path.ends_with("/sessions/permissions") =>
-            {
+            ("GET", "/v1/collections") if query == "scope=manageable" => {
                 let email = self.email(&state)?;
-                let collection_id = path
-                    .strip_prefix("/v1/collections/")
-                    .unwrap()
-                    .strip_suffix("/sessions/permissions")
-                    .unwrap();
-                let can_publish = state
-                    .collections
-                    .get(collection_id)
-                    .map(|(_, publishers)| publishers.contains(&email))
-                    .unwrap_or(false);
-                Ok(
-                    json!({ "permissions": { "canView": can_publish, "canPublish": can_publish, "canMove": can_publish, "canDelete": can_publish } }),
-                )
+                let collection_id = state
+                    .personal_collections
+                    .get(&email)
+                    .cloned()
+                    .unwrap_or_else(|| personal_collection_id(&email));
+                Ok(json!({
+                    "collections": [{
+                        "id": collection_id,
+                        "name": format!("{}'s sessions", email.split('@').next().unwrap_or("user")),
+                        "personalOwnerUserId": format!("user_{}", email.split('@').next().unwrap_or("user")),
+                    }]
+                }))
             }
             ("GET", path)
                 if path.starts_with("/v1/collections/") && path.ends_with("/sessions/entries") =>
@@ -129,16 +137,24 @@ impl Api for FakeApi {
                     .find_map(|pair| pair.strip_prefix("key="))
                     .map(|value| urlencoding::decode(value).unwrap().into_owned())
                     .unwrap_or_default();
+                let Some(owner_email) = state
+                    .personal_collections
+                    .iter()
+                    .find(|(_, id)| id.as_str() == collection_id)
+                    .map(|(email, _)| email.clone())
+                else {
+                    return Err(CliError::new(
+                        "Session not found.",
+                        Some("session_not_found"),
+                        None,
+                    ));
+                };
                 let entries = state
                     .sessions
-                    .get(&(collection_id.to_owned(), key.clone()))
+                    .get(&(owner_email.clone(), key.clone()))
                     .cloned()
                     .unwrap_or_default();
-                if entries.is_empty()
-                    && !state
-                        .sessions
-                        .contains_key(&(collection_id.to_owned(), key))
-                {
+                if entries.is_empty() && !state.sessions.contains_key(&(owner_email, key)) {
                     return Err(CliError::new(
                         "Session not found.",
                         Some("session_not_found"),
@@ -147,72 +163,21 @@ impl Api for FakeApi {
                 }
                 Ok(json!({ "entries": entries, "nextCursor": Value::Null }))
             }
-            ("GET", path) if path.starts_with("/v1/collections/") => {
-                let collection_id = path.strip_prefix("/v1/collections/").unwrap();
-                let Some((name, _)) = state.collections.get(collection_id) else {
-                    return Err(CliError::new(
-                        "Collection not found.",
-                        Some("collection_not_found"),
-                        None,
-                    ));
-                };
-                Ok(json!({ "collection": { "id": collection_id, "name": name } }))
-            }
-            ("POST", path)
-                if path.starts_with("/v1/collections/") && path.ends_with("/sessions") =>
-            {
+            ("POST", "/v1/sessions") => {
                 let email = self.email(&state)?;
-                let collection_id = path
-                    .strip_prefix("/v1/collections/")
-                    .unwrap()
-                    .strip_suffix("/sessions")
-                    .unwrap();
-                let can_publish = state
-                    .collections
-                    .get(collection_id)
-                    .map(|(_, publishers)| publishers.contains(&email))
-                    .unwrap_or(false);
-                if !can_publish {
-                    return Err(CliError::new(
-                        "Access denied.",
-                        Some("session_access_denied"),
-                        None,
-                    ));
-                }
                 let key = body
                     .as_ref()
                     .and_then(|b| b.get("key"))
                     .and_then(Value::as_str)
                     .unwrap()
                     .to_owned();
-                state
-                    .sessions
-                    .entry((collection_id.to_owned(), key))
-                    .or_default();
-                Ok(json!({ "session": { "collectionId": collection_id, "status": "running" } }))
+                state.sessions.entry((email.clone(), key)).or_default();
+                Ok(
+                    json!({ "session": { "ownerId": format!("user_{}", email.split('@').next().unwrap_or("user")), "status": "running" } }),
+                )
             }
-            ("POST", path)
-                if path.starts_with("/v1/collections/")
-                    && path.ends_with("/sessions/logs/native") =>
-            {
+            ("POST", "/v1/sessions/logs/native") => {
                 let email = self.email(&state)?;
-                let collection_id = path
-                    .strip_prefix("/v1/collections/")
-                    .unwrap()
-                    .strip_suffix("/sessions/logs/native")
-                    .unwrap();
-                let can_publish = state
-                    .collections
-                    .get(collection_id)
-                    .map(|(_, publishers)| publishers.contains(&email))
-                    .unwrap_or(false);
-                if !can_publish {
-                    return Err(CliError::new(
-                        "Access denied.",
-                        Some("session_access_denied"),
-                        None,
-                    ));
-                }
                 let body = body.unwrap();
                 let key = body.get("key").and_then(Value::as_str).unwrap().to_owned();
                 let subpath = body
@@ -224,7 +189,7 @@ impl Api for FakeApi {
                     .and_then(Value::as_array)
                     .cloned()
                     .unwrap_or_default();
-                let session_key = (collection_id.to_owned(), key);
+                let session_key = (email, key);
                 if !state.sessions.contains_key(&session_key) {
                     return Err(CliError::new(
                         "Session not found.",
@@ -243,28 +208,8 @@ impl Api for FakeApi {
                     .extend(normalized);
                 Ok(json!({ "pushed": { "entryCount": entries.len() } }))
             }
-            ("POST", path)
-                if path.starts_with("/v1/collections/")
-                    && path.ends_with("/sessions/reconcile/native") =>
-            {
+            ("POST", "/v1/sessions/reconcile/native") => {
                 let email = self.email(&state)?;
-                let collection_id = path
-                    .strip_prefix("/v1/collections/")
-                    .unwrap()
-                    .strip_suffix("/sessions/reconcile/native")
-                    .unwrap();
-                let can_publish = state
-                    .collections
-                    .get(collection_id)
-                    .map(|(_, publishers)| publishers.contains(&email))
-                    .unwrap_or(false);
-                if !can_publish {
-                    return Err(CliError::new(
-                        "Access denied.",
-                        Some("session_access_denied"),
-                        None,
-                    ));
-                }
                 let body = body.unwrap();
                 let key = body.get("key").and_then(Value::as_str).unwrap().to_owned();
                 let subpath = body
@@ -276,7 +221,7 @@ impl Api for FakeApi {
                     .and_then(Value::as_array)
                     .cloned()
                     .unwrap_or_default();
-                let session_key = (collection_id.to_owned(), key);
+                let session_key = (email, key);
                 if !state.sessions.contains_key(&session_key) {
                     return Err(CliError::new(
                         "Session not found.",
@@ -421,23 +366,15 @@ impl Harness {
         }
     }
 
-    // Registers a collection with `email` as the only allowed session
-    // publisher — mirrors createCollection seeding the creator with full
-    // collection_session access.
-    fn seed_collection(&self, id: &str, name: &str, publisher_email: &str) {
-        let mut state = self.state.lock().unwrap();
-        state.collections.insert(
-            id.to_owned(),
-            (name.to_owned(), HashSet::from([publisher_email.to_owned()])),
-        );
-    }
-
-    fn session_entry_count(&self, collection_id: &str, key: &str) -> usize {
+    // Sessions are keyed directly by owner email here (this harness has
+    // direct access to Backend state, unlike the HTTP-only TypeScript
+    // tests, so it doesn't need to resolve a collection id first).
+    fn session_entry_count(&self, owner_email: &str, key: &str) -> usize {
         self.state
             .lock()
             .unwrap()
             .sessions
-            .get(&(collection_id.to_owned(), key.to_owned()))
+            .get(&(owner_email.to_owned(), key.to_owned()))
             .map(Vec::len)
             .unwrap_or(0)
     }
@@ -465,21 +402,10 @@ fn fixture_contents() -> String {
 fn init_configures_and_installs_the_global_hook_and_hooks_remove_is_idempotent() {
     let harness = Harness::new();
     harness.login("hook-init@example.com");
-    harness.seed_collection("coll_1", "HookInit", "hook-init@example.com");
 
-    let init = harness.run(&["init", "--collection", "coll_1"]);
+    let init = harness.run(&["init", "--sessions"]);
     assert_eq!(init.code, 0, "stderr: {}", init.stderr);
-    assert!(init.stdout.contains("coll_1"));
-
-    let sync_config: Value = serde_json::from_str(
-        &fs::read_to_string(format!(
-            "{}/sync-config.json",
-            harness.env["FLOCKFLY_CONFIG_DIR"]
-        ))
-        .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(sync_config["collectionId"], "coll_1");
+    assert!(init.stdout.contains("Configured Claude Code session sync."));
 
     let settings: Value = serde_json::from_str(
         &fs::read_to_string(format!("{}/.claude/settings.json", harness.env["HOME"])).unwrap(),
@@ -504,27 +430,11 @@ fn init_configures_and_installs_the_global_hook_and_hooks_remove_is_idempotent()
 }
 
 #[test]
-fn init_rejects_when_the_caller_lacks_session_publish_access() {
-    let harness = Harness::new();
-    harness.login("hook-owner@example.com");
-    harness.seed_collection("coll_2", "HookOwner", "hook-owner@example.com");
-    harness.login("hook-outsider@example.com");
-
-    let result = harness.run(&["init", "--collection", "coll_2"]);
-    assert_eq!(result.code, 1);
-    assert!(
-        result.stderr.contains("do not have publish access"),
-        "stderr: {}",
-        result.stderr
-    );
-}
-
-#[test]
-fn session_sync_hook_pushes_transcript_entries_end_to_end() {
+fn session_sync_hook_pushes_transcript_entries_end_to_end_into_the_publishers_personal_collection()
+{
     let harness = Harness::new();
     harness.login("hook-sync@example.com");
-    harness.seed_collection("coll_3", "HookSync", "hook-sync@example.com");
-    harness.run(&["init", "--collection", "coll_3"]);
+    harness.run(&["init", "--sessions"]);
 
     let transcripts = tempfile::tempdir().unwrap();
     let path = transcript_path(&transcripts, "-Users-jkim-repo", "sess-1");
@@ -534,23 +444,18 @@ fn session_sync_hook_pushes_transcript_entries_end_to_end() {
     let sync = harness.run_with_stdin(&["session", "sync", "--hook"], &stdin);
     assert_eq!(sync.code, 0, "stderr: {}", sync.stderr);
     assert_eq!(
-        harness.session_entry_count("coll_3", "-Users-jkim-repo/sess-1"),
+        harness.session_entry_count("hook-sync@example.com", "-Users-jkim-repo/sess-1"),
         3
     );
 }
 
 #[test]
-fn session_sync_hook_is_best_effort_with_no_collection_configured_or_a_missing_transcript() {
+fn session_sync_hook_is_best_effort_when_the_transcript_is_missing() {
     let harness = Harness::new();
+    harness.login("hook-missing-file@example.com");
+    harness.run(&["init", "--sessions"]);
     let stdin =
         json!({ "transcript_path": "/nonexistent/session.jsonl", "session_id": "s" }).to_string();
-    let unconfigured = harness.run_with_stdin(&["session", "sync", "--hook"], &stdin);
-    assert_eq!(unconfigured.code, 0);
-    assert!(unconfigured.stderr.contains("no collection configured"));
-
-    harness.login("hook-missing-file@example.com");
-    harness.seed_collection("coll_4", "HookMissingFile", "hook-missing-file@example.com");
-    harness.run(&["init", "--collection", "coll_4"]);
     let missing_file = harness.run_with_stdin(&["session", "sync", "--hook"], &stdin);
     assert_eq!(missing_file.code, 0);
 }
@@ -559,8 +464,7 @@ fn session_sync_hook_is_best_effort_with_no_collection_configured_or_a_missing_t
 fn session_sync_hook_only_pushes_newly_appended_lines_on_a_second_fire() {
     let harness = Harness::new();
     harness.login("hook-incremental@example.com");
-    harness.seed_collection("coll_5", "HookIncremental", "hook-incremental@example.com");
-    harness.run(&["init", "--collection", "coll_5"]);
+    harness.run(&["init", "--sessions"]);
 
     let transcripts = tempfile::tempdir().unwrap();
     let path = transcript_path(&transcripts, "-Users-jkim-repo", "sess-2");
@@ -576,7 +480,7 @@ fn session_sync_hook_only_pushes_newly_appended_lines_on_a_second_fire() {
     let stdin = json!({ "transcript_path": path, "session_id": "sess-2" }).to_string();
     harness.run_with_stdin(&["session", "sync", "--hook"], &stdin);
     assert_eq!(
-        harness.session_entry_count("coll_5", "-Users-jkim-repo/sess-2"),
+        harness.session_entry_count("hook-incremental@example.com", "-Users-jkim-repo/sess-2"),
         1
     );
 
@@ -589,7 +493,7 @@ fn session_sync_hook_only_pushes_newly_appended_lines_on_a_second_fire() {
 
     harness.run_with_stdin(&["session", "sync", "--hook"], &stdin);
     assert_eq!(
-        harness.session_entry_count("coll_5", "-Users-jkim-repo/sess-2"),
+        harness.session_entry_count("hook-incremental@example.com", "-Users-jkim-repo/sess-2"),
         2
     );
 }
@@ -598,8 +502,7 @@ fn session_sync_hook_only_pushes_newly_appended_lines_on_a_second_fire() {
 fn reconcile_backfills_entries_a_prior_incremental_push_missed() {
     let harness = Harness::new();
     harness.login("hook-reconcile@example.com");
-    harness.seed_collection("coll_6", "HookReconcile", "hook-reconcile@example.com");
-    harness.run(&["init", "--collection", "coll_6"]);
+    harness.run(&["init", "--sessions"]);
 
     let transcripts = tempfile::tempdir().unwrap();
     let path = transcript_path(&transcripts, "-Users-jkim-repo", "sess-3");
@@ -611,7 +514,7 @@ fn reconcile_backfills_entries_a_prior_incremental_push_missed() {
     let stdin = json!({ "transcript_path": path, "session_id": "sess-3" }).to_string();
     harness.run_with_stdin(&["session", "sync", "--hook"], &stdin);
     assert_eq!(
-        harness.session_entry_count("coll_6", "-Users-jkim-repo/sess-3"),
+        harness.session_entry_count("hook-reconcile@example.com", "-Users-jkim-repo/sess-3"),
         2
     );
 
@@ -622,7 +525,7 @@ fn reconcile_backfills_entries_a_prior_incremental_push_missed() {
     let reconcile = harness.run_with_stdin(&["session", "sync", "--hook", "--reconcile"], &stdin);
     assert_eq!(reconcile.code, 0, "stderr: {}", reconcile.stderr);
     assert_eq!(
-        harness.session_entry_count("coll_6", "-Users-jkim-repo/sess-3"),
+        harness.session_entry_count("hook-reconcile@example.com", "-Users-jkim-repo/sess-3"),
         3
     );
 }
