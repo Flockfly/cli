@@ -157,3 +157,48 @@ TypeScript test names, since this is additive, not ported):
 `.code-assist/flockfly-cli-rust-distribution/plan.md` is a frozen snapshot
 of the initial TS→Rust transfer checklist and was not updated for the two
 redesigns above either — this entry follows that same precedent.
+
+## Session storage permissions redesign (2026-08-05)
+
+Breaking API contract change, ported from the same day's TypeScript
+reference change (`context-router/cli/src/{commands,config,session}.ts`,
+`context-router/api`'s session routes/services). Publishing a session is
+now unconditional for any authenticated user — there is no collection to
+choose and no `collection_session` grant to check. Visibility into
+collections is computed server-side at publish time (every enabled
+router's owning collection, plus the publisher's own auto-provisioned
+personal collection). This makes `init --collection <id>` meaningless:
+there's nothing to configure, so it's replaced by a bare `init --sessions`
+boolean flag that just installs the hook.
+
+- `src/config.rs`: removed `SyncConfig`/`load_sync_config`/`save_sync_config`
+  and `~/.flockfly/sync-config.json` entirely — nothing to persist anymore.
+- `src/commands.rs`: `Init { collection: Option<String> }` →
+  `Init { sessions: bool }`; `init_with_collection` (which did a
+  `GET /v1/collections/:id` existence check, a
+  `GET .../sessions/permissions` publish-access check, then saved the sync
+  config) replaced by `init_sessions`, which just calls
+  `install_global_hook` directly — no API calls at all. `SessionCommand::Sync`
+  dropped its `--collection` override flag.
+- `src/session.rs`: `SessionSyncOptions` dropped `collection`; the "no
+  collection configured, run `init --collection <id>` first" early-return
+  is gone; the three HTTP calls move from
+  `/v1/collections/{id}/sessions(/logs/native|/reconcile/native)` to
+  unscoped `/v1/sessions(/logs/native|/reconcile/native)`.
+- `tests/session_sync_compat.rs`: rewritten fake backend drops the
+  `collections: HashMap<String, (String, HashSet<String>)>`
+  publish-allowlist entirely (nothing gates publish anymore); sessions are
+  now keyed by `(ownerEmail, key)` instead of `(collectionId, key)`; added
+  a `personal_collections: HashMap<String, String>` map auto-populated on
+  login (mirrors `ensurePersonalCollection`, called from every
+  `ensureUserByEmail`) and a `GET /v1/collections?scope=manageable`
+  handler so `/sessions/entries` reads can still resolve a collection id
+  back to its owner. Dropped the "rejects init when the caller can't read
+  the collection" test (nothing to reject now) and the "no collection
+  configured" half of the best-effort test.
+- `src/hooks.rs`: one stray doc-comment reference to `init --collection
+  <id>` updated to `init --sessions`.
+
+`Cargo.toml` bumped `0.4.0` → `1.0.0` per `RELEASE.md`'s own semver table
+("Breaking CLI change, API contract change" — a flag removed, and every
+client on the old contract 404s against the new backend).
