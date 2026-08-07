@@ -1,12 +1,10 @@
 # Contributing to Flockfly CLI
 
-See `MIGRATION.md` for the TypeScript-to-Rust cutover policy this repo is operating under.
-
 ## Prerequisites
 
 - [Rust toolchain](https://rustup.rs/) (stable)
 - [Docker](https://docs.docker.com/get-docker/) (for integration tests)
-- Node.js 24+ and a local [Context Router](MIGRATION.md) checkout (for the real-API e2e suite)
+- Node.js 24+ and a local Context Router checkout (for the real-API e2e suite)
 
 ## Setup
 

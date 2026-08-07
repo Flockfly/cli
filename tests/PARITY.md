@@ -83,7 +83,7 @@ CLI's `init` output and command description were updated to match:
 
 New feature, not a ported TS behavior — this is the first case where the
 source TypeScript CLI grew a capability that didn't exist yet anywhere, so
-per `MIGRATION.md`'s "TS is the reference" workflow it was built first in
+per the "TS is the reference" workflow it was built first in
 `context-router/cli` (`src/{hooks,hookSync,session}.ts`, extended
 `config.ts`/`commands.ts`, and new `test/{hooks,hookSync}.test.ts` plus
 extensions to `test/cli.test.ts`) and then ported here 1:1. It does not

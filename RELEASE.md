@@ -34,7 +34,6 @@ Public release actions require explicit product-owner approval. Preparing and va
   ```
 
   This can't run in CI today since the Context Router isn't checked into this repo or published, so it stays a required local pre-tag step rather than an automated gate. Do not tag a release without having run it.
-- Review `MIGRATION.md` and preserve the TypeScript rollback path.
 - Confirm repository release permissions and the `HOMEBREW_TAP_TOKEN` secret for `flockfly/homebrew-tap`.
 
 ## 1. Decide the new version
@@ -56,8 +55,6 @@ Before bumping the version, answer these questions:
 - **CLI flags** — are any existing flags renamed or removed? If yes, add a deprecation note in the help text for at least one minor release before removing.
 - **Config and credentials** — does `~/.flockfly/credentials.json` still parse under the old schema? `FLOCKFLY_CONFIG_DIR`, `FLOCKFLY_API_URL`, and `FLOCKFLY_TOKEN` must keep working exactly as documented in the README.
 - **Skill package contract** — does a `SKILL.md` with valid `name`/`description` frontmatter that publishes today still publish under the new version? Don't tighten package validation in a patch or minor release without a deprecation window.
-- **TypeScript CLI parity** — per `MIGRATION.md`, the Rust and TypeScript CLIs must produce comparable stdout/stderr/exit codes for the same inputs during the cutover window.
-
 If any of these require a migration, document the migration steps before releasing.
 
 ## 3. Bump the version

@@ -111,4 +111,4 @@ FLOCKFLY_CONTEXT_ROUTER_DIR=/path/to/context-router \
   node --test tests/e2e/real-api.test.mjs
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow, [MIGRATION.md](MIGRATION.md) for the TypeScript fallback/cutover policy, and [RELEASE.md](RELEASE.md) for the release checklist.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow and [RELEASE.md](RELEASE.md) for the release checklist.
